@@ -13,12 +13,15 @@ This project is specifically for Toyota Security Key (TSK) owners who want usefu
 telemetry features while the broader TSK support path is still being solved. It is not itself a
 TSK bypass, key extractor, or replacement for reviewed openpilot/opendbc TSK support.
 
-Comma download/install URL: **[installer.comma.ai/spanconstant5/tskdash](https://installer.comma.ai/spanconstant5/tskdash)**
+On the **Custom Software** screen of a comma 3/3X or comma 4, type exactly:
 
-Enter that URL under **Custom Software** on a comma 3/3X or comma 4. This is an alpha test branch.
-The comma installer convention resolves `spanconstant5/openpilot` branch `tskdash`; if it reports
-that the repository cannot be found while this project is still named `comma4TSKdashcam`, use the
-[documented SSH install](docs/INSTALL_COMMA.md) until the repository is renamed or mirrored.
+```text
+spanconstant5/tskdash
+```
+
+The comma setup screen automatically expands that short entry to
+**[installer.comma.ai/spanconstant5/tskdash](https://installer.comma.ai/spanconstant5/tskdash)**
+and installs the `tskdash` branch from `spanconstant5/openpilot`. This is an alpha test branch.
 
 The HUD keeps speed bottom-center, **Throttle** and **Brake** bars bottom-left, a steering-angle
 scale bottom-right, driver status at left, assistance status at upper-right, and only a compact

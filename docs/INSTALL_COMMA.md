@@ -18,26 +18,26 @@ over immediately.
 This branch follows current upstream openpilot because official comma four support postdates the
 original fork base.
 
-## Install this repository
+## Install from the comma setup screen
 
-The requested device URL is:
+Choose **Custom Software** and type exactly:
 
 ```text
-installer.comma.ai/spanconstant5/tskdash
+spanconstant5/tskdash
 ```
 
-The standard `installer.comma.ai/<user>/<branch>` convention expects the user's repository to be
-named `openpilot`. This repository is currently named `comma4TSKdashcam`, so that exact URL will
-work after the tested `tskdash` branch is mirrored to `spanconstant5/openpilot` or this repository
-is renamed to `openpilot`. Until then, use the developer SSH install below; the URL cannot point at
-an arbitrarily named GitHub repository.
+Both the comma 3/3X and comma 4 setup screens automatically expand a two-part entry to
+`https://installer.comma.ai/spanconstant5/tskdash`. The installer then downloads the `tskdash`
+branch from `spanconstant5/openpilot`.
+
+## Developer SSH install
 
 For an existing developer installation, connect over SSH and run:
 
 ```sh
 cd /data/openpilot
-git remote add dashcam https://github.com/spanconstant5/comma4TSKdashcam.git || \
-  git remote set-url dashcam https://github.com/spanconstant5/comma4TSKdashcam.git
+git remote add dashcam https://github.com/spanconstant5/openpilot.git || \
+  git remote set-url dashcam https://github.com/spanconstant5/openpilot.git
 git fetch dashcam tag v0.1.0-alpha.1
 git switch --detach v0.1.0-alpha.1
 sudo reboot
