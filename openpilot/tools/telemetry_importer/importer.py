@@ -162,10 +162,7 @@ def import_drive(adb: Path, serial: str, manifest_path: PurePosixPath, destinati
 
 
 def default_destination() -> Path:
-  profile = os.environ.get("USERPROFILE")
-  if not profile:
-    raise ImportFailure("USERPROFILE is unavailable; pass --destination explicitly.")
-  return Path(profile) / "Documents" / "Comma Telemetry"
+  return Path.home() / "Documents" / "Comma Telemetry"
 
 
 def main() -> None:
