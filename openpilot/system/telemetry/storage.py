@@ -45,8 +45,8 @@ def _finish_recovered_database(path: Path, end_mono_ns: int, end_wall_ms: int) -
       connection.close()
       return False
     connection.execute(
-      "UPDATE segment_metadata SET status = 'complete', end_mono_ns = ?, "
-      "end_wall_ms = ?, close_reason = 'crash_recovered' WHERE status = 'active'",
+      """UPDATE segment_metadata SET status = 'complete', end_mono_ns = ?,
+         end_wall_ms = ?, close_reason = 'crash_recovered' WHERE status = 'active'""",
       (end_mono_ns, end_wall_ms),
     )
     connection.commit()
@@ -181,8 +181,8 @@ class TelemetryStorage:
     if self.connection is None:
       return
     self.connection.execute(
-      "UPDATE segment_metadata SET status = 'complete', end_mono_ns = ?, "
-      "end_wall_ms = ?, close_reason = ?",
+      """UPDATE segment_metadata SET status = 'complete', end_mono_ns = ?,
+         end_wall_ms = ?, close_reason = ?""",
       (end.mono_ns, end.wall_ms, reason),
     )
     self.connection.commit()
@@ -224,8 +224,8 @@ class TelemetryStorage:
     if self.connection is None:
       raise RuntimeError("telemetry storage is closed")
     self.connection.execute(
-      "INSERT INTO events (mono_time_ns, wall_time_ms, kind, value, severity, details_json) "
-      "VALUES (?, ?, ?, ?, ?, ?)",
+      """INSERT INTO events (mono_time_ns, wall_time_ms, kind, value, severity, details_json)
+         VALUES (?, ?, ?, ?, ?, ?)""",
       (clock.mono_ns, clock.wall_ms, kind, value, severity,
        json.dumps(details, separators=(",", ":")) if details else None),
     )
@@ -235,8 +235,8 @@ class TelemetryStorage:
     if self.connection is None:
       raise RuntimeError("telemetry storage is closed")
     self.connection.execute(
-      "INSERT OR REPLACE INTO model_paths (mono_time_ns, frame_id, x_json, y_json, z_json) "
-      "VALUES (?, ?, ?, ?, ?)",
+      """INSERT OR REPLACE INTO model_paths (mono_time_ns, frame_id, x_json, y_json, z_json)
+         VALUES (?, ?, ?, ?, ?)""",
       (clock.mono_ns, frame_id, json.dumps(x, separators=(",", ":")),
        json.dumps(y, separators=(",", ":")), json.dumps(z, separators=(",", ":"))),
     )
@@ -247,11 +247,11 @@ class TelemetryStorage:
       return
     relative_path = f"{route}--{segment_num}/fcamera.hevc"
     self.connection.execute(
-      "INSERT INTO video_segments "
-      "(route, segment_num, relative_path, first_mono_ns, last_mono_ns, first_encode_time_ns, last_encode_time_ns) "
-      "VALUES (?, ?, ?, ?, ?, ?, ?) "
-      "ON CONFLICT(route, segment_num) DO UPDATE SET last_mono_ns = excluded.last_mono_ns, "
-      "last_encode_time_ns = excluded.last_encode_time_ns",
+      """INSERT INTO video_segments
+         (route, segment_num, relative_path, first_mono_ns, last_mono_ns, first_encode_time_ns, last_encode_time_ns)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(route, segment_num) DO UPDATE SET last_mono_ns = excluded.last_mono_ns,
+         last_encode_time_ns = excluded.last_encode_time_ns""",
       (route, segment_num, relative_path, clock.mono_ns, clock.mono_ns, encode_time_ns, encode_time_ns),
     )
     identity = (route, segment_num)

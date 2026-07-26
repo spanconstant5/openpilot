@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS samples (
   brake REAL,
   brake_pressed INTEGER,
   engine_rpm REAL,
+  stock_aeb INTEGER,
+  cruise_available INTEGER,
+  cruise_enabled INTEGER,
   selfdrive_state TEXT,
   engaged INTEGER,
   active INTEGER,
@@ -99,7 +102,8 @@ CREATE TABLE IF NOT EXISTS video_segments (
 SAMPLE_COLUMNS = (
   "mono_time_ns", "wall_time_ms", "v_ego_mps", "a_ego_mps2",
   "steering_angle_deg", "steering_torque", "steering_pressed", "gas",
-  "gas_pressed", "brake", "brake_pressed", "engine_rpm", "selfdrive_state",
+  "gas_pressed", "brake", "brake_pressed", "engine_rpm", "stock_aeb",
+  "cruise_available", "cruise_enabled", "selfdrive_state",
   "engaged", "active", "engageable", "alert_type", "alert_status",
   "alert_text_1", "alert_text_2", "gps_latitude", "gps_longitude",
   "gps_altitude_m", "gps_speed_mps", "gps_bearing_deg", "gps_accuracy_m",
@@ -110,7 +114,7 @@ SAMPLE_COLUMNS = (
 )
 
 INSERT_SAMPLE_SQL = (
-  f"INSERT OR REPLACE INTO samples ({', '.join(SAMPLE_COLUMNS)}) "
+  f"INSERT OR REPLACE INTO samples ({', '.join(SAMPLE_COLUMNS)}) " +
   f"VALUES ({', '.join('?' for _ in SAMPLE_COLUMNS)})"
 )
 
@@ -120,9 +124,9 @@ def create_schema(connection: sqlite3.Connection, drive_id: str, segment_index: 
   connection.executescript(SCHEMA_SQL)
   connection.execute("DELETE FROM segment_metadata")
   connection.execute(
-    "INSERT INTO segment_metadata "
-    "(schema_version, drive_id, segment_index, status, start_mono_ns, start_wall_ms) "
-    "VALUES (?, ?, ?, 'active', ?, ?)",
+    """INSERT INTO segment_metadata
+       (schema_version, drive_id, segment_index, status, start_mono_ns, start_wall_ms)
+       VALUES (?, ?, ?, 'active', ?, ?)""",
     (SCHEMA_VERSION, drive_id, segment_index, start_mono_ns, start_wall_ms),
   )
   connection.commit()

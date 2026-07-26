@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from cereal import messaging
+from opendbc.car.structs import car
 from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper
 from openpilot.common.swaglog import cloudlog
@@ -45,8 +46,16 @@ class TelemetryRecorder:
   def __init__(self) -> None:
     self.sm = messaging.SubMaster(list(SERVICES))
     self.params = Params()
+    metadata: dict[str, Any] = {"sample_rate_hz": SAMPLE_RATE_HZ}
+    car_params = self.params.get("CarParamsPersistent")
+    if car_params is not None:
+      try:
+        CP = messaging.log_from_bytes(car_params, car.CarParams)
+        metadata.update({"vehicle_brand": str(CP.brand), "car_fingerprint": str(CP.carFingerprint)})
+      except Exception:
+        cloudlog.exception("telemetryd could not read CarParamsPersistent")
     start = SegmentClock(time.monotonic_ns(), time.time_ns() // 1_000_000)
-    self.storage = TelemetryStorage(telemetry_root(), start=start, metadata={"sample_rate_hz": SAMPLE_RATE_HZ})
+    self.storage = TelemetryStorage(telemetry_root(), start=start, metadata=metadata)
     self.running = True
     self.frame = 0
     self.last_event_values: dict[str, Any] = {}
@@ -87,17 +96,24 @@ class TelemetryRecorder:
     sample: dict[str, Any] = {}
     if self.sm.valid["carState"]:
       car_state = self.sm["carState"]
+      legacy = car_state.deprecated
+      gas = float(legacy.gas)
+      brake = float(legacy.brake)
+      engine_rpm = float(legacy.engineRpm)
       sample.update({
         "v_ego_mps": float(car_state.vEgo),
         "a_ego_mps2": float(car_state.aEgo),
         "steering_angle_deg": float(car_state.steeringAngleDeg),
         "steering_torque": float(car_state.steeringTorque),
         "steering_pressed": bool(car_state.steeringPressed),
-        "gas": float(car_state.gas),
+        "gas": gas if gas > 0 else None,
         "gas_pressed": bool(car_state.gasPressed),
-        "brake": float(car_state.brake),
+        "brake": brake if brake > 0 else None,
         "brake_pressed": bool(car_state.brakePressed),
-        "engine_rpm": float(car_state.engineRpm) if car_state.engineRpm > 0 else None,
+        "engine_rpm": engine_rpm if engine_rpm > 0 else None,
+        "stock_aeb": bool(car_state.stockAeb),
+        "cruise_available": bool(car_state.cruiseState.available),
+        "cruise_enabled": bool(car_state.cruiseState.enabled),
       })
       self._record_change(clock, "brake_override", bool(car_state.brakePressed))
       self._record_change(clock, "steering_override", bool(car_state.steeringPressed))
@@ -125,12 +141,13 @@ class TelemetryRecorder:
 
     if self.sm.valid["driverMonitoringState"]:
       monitoring = self.sm["driverMonitoringState"]
+      vision = monitoring.visionPolicyState
       sample.update({
-        "driver_face_detected": bool(monitoring.faceDetected),
-        "driver_distracted": bool(monitoring.isDistracted),
-        "driver_awareness": float(monitoring.awarenessStatus),
+        "driver_face_detected": bool(vision.faceDetected),
+        "driver_distracted": bool(vision.isDistracted),
+        "driver_awareness": float(vision.awarenessPercent) / 100.0,
       })
-      self._record_change(clock, "driver_distraction", bool(monitoring.isDistracted))
+      self._record_change(clock, "driver_distraction", bool(vision.isDistracted))
       if self.sm.valid["driverStateV2"]:
         driver_state = self.sm["driverStateV2"]
         driver = driver_state.rightDriverData if monitoring.isRHD else driver_state.leftDriverData
