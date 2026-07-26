@@ -1,5 +1,9 @@
 # comma dashcam telemetry
 
+> **First alpha build:** `v0.1.0-alpha.1` is the first public testing build of this project.
+> It has not been validated on comma hardware or in a vehicle. Expect incomplete fields and UI
+> issues; test cautiously, remain ready to take over, and report results before relying on it.
+
 `v0.1.0-alpha.1` turns this openpilot fork into a read-only dashcam and telemetry platform for
 comma 3, comma 3X, and comma 4. It adds a low-overhead live HUD, segmented SQLite telemetry,
 Windows ADB import, and a desktop replay viewer. It does **not** add autonomous-driving or
@@ -8,6 +12,13 @@ vehicle-control behavior, and it reuses openpilot's existing encoded road video.
 This project is specifically for Toyota Security Key (TSK) owners who want useful dashcam and
 telemetry features while the broader TSK support path is still being solved. It is not itself a
 TSK bypass, key extractor, or replacement for reviewed openpilot/opendbc TSK support.
+
+Comma download/install URL: **[installer.comma.ai/spanconstant5/tskdash](https://installer.comma.ai/spanconstant5/tskdash)**
+
+Enter that URL under **Custom Software** on a comma 3/3X or comma 4. This is an alpha test branch.
+The comma installer convention resolves `spanconstant5/openpilot` branch `tskdash`; if it reports
+that the repository cannot be found while this project is still named `comma4TSKdashcam`, use the
+[documented SSH install](docs/INSTALL_COMMA.md) until the repository is renamed or mirrored.
 
 The HUD keeps speed bottom-center, **Throttle** and **Brake** bars bottom-left, a steering-angle
 scale bottom-right, driver status at left, assistance status at upper-right, and only a compact
