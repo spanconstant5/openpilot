@@ -206,6 +206,19 @@ class TelemetryStorage:
     self._close_segment(clock, "rotation")
     self._open_segment(clock)
 
+  def finalize_active_segment(self, clock: SegmentClock, reason: str) -> None:
+    """Commit, checkpoint, and close the current file without ending the recorder object."""
+    if self.closed:
+      raise RuntimeError("telemetry storage is closed")
+    self._close_segment(clock, reason)
+
+  def resume(self, clock: SegmentClock) -> None:
+    """Start a new segment after an ignition-off pause."""
+    if self.closed:
+      raise RuntimeError("telemetry storage is closed")
+    if self.connection is None:
+      self._open_segment(clock)
+
   def write_sample(self, sample: dict[str, Any], clock: SegmentClock) -> None:
     if self.closed or self.connection is None:
       raise RuntimeError("telemetry storage is closed")

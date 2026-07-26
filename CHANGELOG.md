@@ -13,6 +13,7 @@ pull request. Phase 1 remains on `tskdash`; Phase 2 remains on `codex/phase2-des
 - Signed wheel-power calculation, with motion-derived fallback visibly marked `EST`
 - TSS status distinguishes actively engaged radar cruise and LTA from manual city driving
 - Hybrid battery percentage stays unavailable until a verified 2025 Corolla Hybrid mapping exists
+- Immediate SQLite commit/checkpoint when a known panda reports ignition off
 
 ### Replay and export
 
