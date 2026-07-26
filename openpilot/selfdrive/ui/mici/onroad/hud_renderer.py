@@ -1,6 +1,7 @@
 import pyray as rl
 from dataclasses import dataclass
 from openpilot.common.constants import CV
+from openpilot.selfdrive.ui.onroad.dashcam_hud import DashcamHudLayer
 from openpilot.selfdrive.ui.mici.onroad.torque_bar import TorqueBar
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.system.ui.lib.application import gui_app, FontWeight
@@ -126,6 +127,7 @@ class HudRenderer(Widget):
     self._wheel_y_filter = FirstOrderFilter(0, 0.1, 1 / gui_app.target_fps)
 
     self._set_speed_alpha_filter = FirstOrderFilter(0.0, 0.1, 1 / gui_app.target_fps)
+    self._dashcam_hud = DashcamHudLayer(compact=True)
 
   def set_wheel_critical_icon(self, critical: bool):
     """Set the wheel icon to critical or normal state."""
@@ -180,7 +182,9 @@ class HudRenderer(Widget):
     if ui_state.usbgpu and ui_state.usbgpu_compiled:
       self._draw_model_source(rect)
 
-    self._draw_steering_wheel(rect)
+    if self._show_wheel_critical:
+      self._draw_steering_wheel(rect)
+    self._dashcam_hud.render(rect)
 
   def _draw_model_source(self, rect: rl.Rectangle) -> None:
     if ui_state.sm.recv_frame['selfdriveState'] < ui_state.started_frame:

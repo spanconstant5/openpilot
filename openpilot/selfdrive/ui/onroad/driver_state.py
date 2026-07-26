@@ -162,11 +162,12 @@ class DriverStateRenderer(Widget):
 
   def _pre_calculate_drawing_elements(self):
     """Pre-calculate all drawing elements based on the current rectangle"""
-    # Calculate icon position (bottom-left or bottom-right)
+    # Keep driver monitoring at the left side so it does not cover the
+    # bottom-left throttle/brake telemetry bars.
     width, height = self._rect.width, self._rect.height
     offset = UI_BORDER_SIZE + BTN_SIZE // 2
-    self.position_x = self._rect.x + (width - offset if self.is_rhd else offset)
-    self.position_y = self._rect.y + height - offset
+    self.position_x = self._rect.x + offset
+    self.position_y = self._rect.y + height * 0.48
 
     # Pre-calculate the face lines positions
     positioned_keypoints = self.face_keypoints_transformed + np.array([self.position_x, self.position_y])
