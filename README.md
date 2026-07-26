@@ -33,6 +33,10 @@ The recorder listens to the comma's existing panda ignition state. When a known 
 car off, the active SQLite file is immediately committed, checkpointed, and marked complete before
 the normal manager shutdown; missing ignition data does not trigger a false save.
 
+Persistent passive-mode alert cards are suppressed in the dashcam HUD and replaced by a compact
+`READ ONLY` marker. Critical driving, hardware, storage, driver-monitoring, and unresponsive-system
+alerts remain fully visible and audible.
+
 Start here:
 
 - [Architecture](docs/ARCHITECTURE.md)
