@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 SCHEMA_SQL = """
@@ -32,9 +32,17 @@ CREATE TABLE IF NOT EXISTS samples (
   brake REAL,
   brake_pressed INTEGER,
   engine_rpm REAL,
+  engine_running INTEGER,
+  hybrid_battery_percent REAL,
+  ev_mode INTEGER,
+  power_flow_kw REAL,
+  power_flow_source TEXT,
+  hybrid_drive_force_n REAL,
   stock_aeb INTEGER,
   cruise_available INTEGER,
   cruise_enabled INTEGER,
+  lta_active INTEGER,
+  tss_status TEXT,
   selfdrive_state TEXT,
   engaged INTEGER,
   active INTEGER,
@@ -102,8 +110,10 @@ CREATE TABLE IF NOT EXISTS video_segments (
 SAMPLE_COLUMNS = (
   "mono_time_ns", "wall_time_ms", "v_ego_mps", "a_ego_mps2",
   "steering_angle_deg", "steering_torque", "steering_pressed", "gas",
-  "gas_pressed", "brake", "brake_pressed", "engine_rpm", "stock_aeb",
-  "cruise_available", "cruise_enabled", "selfdrive_state",
+  "gas_pressed", "brake", "brake_pressed", "engine_rpm", "engine_running",
+  "hybrid_battery_percent", "ev_mode", "power_flow_kw", "power_flow_source",
+  "hybrid_drive_force_n", "stock_aeb", "cruise_available", "cruise_enabled",
+  "lta_active", "tss_status", "selfdrive_state",
   "engaged", "active", "engageable", "alert_type", "alert_status",
   "alert_text_1", "alert_text_2", "gps_latitude", "gps_longitude",
   "gps_altitude_m", "gps_speed_mps", "gps_bearing_deg", "gps_accuracy_m",

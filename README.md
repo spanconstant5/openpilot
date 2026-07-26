@@ -9,6 +9,11 @@
 > not a published GitHub release. The comma road-test branch remains `tskdash` at the Phase 1 build.
 > See the [changelog](CHANGELOG.md) for the exact build status and checklist.
 
+> **Separate, unpublished Phase 3 work:** Toyota hybrid replay, radar-cruise/LTA-specific TSS
+> status, route/OSM tools, predicted-path replay, rendered MP4 export, and desktop launchers are on
+> `codex/phase3-toyota-hybrid` plus separate Windows/macOS/Linux app branches. These are uploaded
+> source builds only—not tags, releases, signed installers, or comma install branches.
+
 `v0.1.0-alpha.1` turns this openpilot fork into a read-only dashcam and telemetry platform for
 comma 3, comma 3X, and comma 4. It adds a low-overhead live HUD, segmented SQLite telemetry,
 Windows ADB import, and a desktop replay viewer. It does **not** add autonomous-driving or
@@ -19,6 +24,11 @@ parsing, synchronized video/HUD replay, event markers, an offline GPS trace, dri
 a dedicated Statistics page. The Statistics page reports distance, duration, average/maximum
 speed, assist engagement, distraction and driver-override time, GPS/data/video coverage, steering
 range, and event totals.
+
+Phase 3 keeps `TSS ACTIVE` for the highway-style condition where radar cruise and/or LTA is truly
+engaged. Manual city driving shows `TSS READY` or `TSS OFF`; a pedal/steering override is a separate
+orange warning. For the 2025 Corolla Hybrid, only signals verified in the selected Toyota DBC are
+decoded, and unavailable data stays blank. In particular, battery SOC is not guessed.
 
 This project is specifically for Toyota Security Key (TSK) owners who want useful dashcam and
 telemetry features while the broader TSK support path is still being solved. It is not itself a
@@ -49,6 +59,8 @@ Start here:
 - [Telemetry schema](docs/TELEMETRY_SCHEMA.md)
 - [Known limitations](docs/KNOWN_LIMITATIONS.md)
 - [Toyota signal policy](docs/TOYOTA_SIGNALS.md)
+- [Phase 3 Toyota hybrid notes](docs/PHASE3_TOYOTA.md)
+- [Cross-platform desktop apps](docs/CROSS_PLATFORM_APPS.md)
 
 Recordings can include location, vehicle activity, alerts, and driver-monitoring measurements.
 Treat copied drives as sensitive. This alpha has desktop validation only until owners complete the

@@ -17,6 +17,7 @@ def create_drive(tmp_path):
       "driver_distracted": index == 1,
       "engaged": index == 1,
     }, clock)
+    storage.write_model_path(clock, index, [0.0, 10.0], [0.0, float(index)], [0.0, 0.0])
   storage.write_event(SegmentClock(1_500_000_000, start.wall_ms + 500), "driver_distraction", "True")
   storage.close(SegmentClock(2_100_000_000, start.wall_ms + 1_100))
   return storage.drive_directory
@@ -44,6 +45,13 @@ def test_summary_and_markers(tmp_path):
   assert summary.gps_fix_percent == 2 / 3 * 100
   assert summary.event_counts == {"driver_distraction": 1}
   assert [event.kind for event in drive.markers()] == ["driver_distraction"]
+
+
+def test_nearest_model_path_synchronization(tmp_path):
+  drive = DriveData.open(create_drive(tmp_path))
+  assert drive.nearest_path(1_240_000_000).frame_id == 0
+  assert drive.path_at_seconds(0.76).frame_id == 2
+  assert drive.path_at_seconds(0.5).y == [0.0, 1.0]
 
 
 def test_empty_summary(tmp_path):

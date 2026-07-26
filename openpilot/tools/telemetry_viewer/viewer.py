@@ -6,13 +6,14 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QUrl, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QPainter
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QPainter, QPen
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
                                QMessageBox, QPushButton, QSlider, QSplitter, QTabWidget, QVBoxLayout, QWidget)
 
 from openpilot.tools.telemetry_viewer.hud import HudOverlay
+from openpilot.tools.telemetry_viewer.exporter import ExportFailure, render_drive_mp4
 from openpilot.tools.telemetry_viewer.model import DriveData, DriveSummary, Event, VideoSegment
 
 
@@ -65,10 +66,15 @@ class RouteWidget(QWidget):
   def __init__(self):
     super().__init__()
     self.points: list[tuple[float, float]] = []
+    self.current_point: tuple[float, float] | None = None
     self.setMinimumHeight(120)
 
   def set_points(self, points: list[tuple[float, float]]) -> None:
     self.points = points
+    self.update()
+
+  def set_current_point(self, point: tuple[float, float] | None) -> None:
+    self.current_point = point
     self.update()
 
   def paintEvent(self, _event) -> None:
@@ -91,6 +97,13 @@ class RouteWidget(QWidget):
     painter.setPen(QColor("#70cf4e"))
     for start, end in zip(projected, projected[1:], strict=False):
       painter.drawLine(round(start[0]), round(start[1]), round(end[0]), round(end[1]))
+    if self.current_point is not None:
+      latitude, longitude = self.current_point
+      x = 12 + (longitude - min(longitudes)) / lon_span * (self.width() - 24)
+      y = self.height() - 12 - (latitude - min(latitudes)) / lat_span * (self.height() - 24)
+      painter.setPen(QPen(QColor("white"), 2))
+      painter.setBrush(QColor("#1f89e5"))
+      painter.drawEllipse(round(x) - 5, round(y) - 5, 10, 10)
 
 
 class StatisticCard(QFrame):
@@ -255,11 +268,15 @@ class ReplayWindow(QMainWindow):
     self.summary_label.setWordWrap(True)
     self.summary_label.setAlignment(Qt.AlignmentFlag.AlignTop)
     self.route = RouteWidget()
+    self.open_osm_button = QPushButton("Open route in OpenStreetMap")
+    self.open_osm_button.setEnabled(False)
+    self.open_osm_button.clicked.connect(self.open_route_in_osm)
     side_layout = QVBoxLayout()
     side_layout.addWidget(QLabel("Drive summary"))
     side_layout.addWidget(self.summary_label)
     side_layout.addWidget(QLabel("GPS route"))
     side_layout.addWidget(self.route)
+    side_layout.addWidget(self.open_osm_button)
     side_layout.addStretch()
     side = QWidget()
     side.setMinimumWidth(255)
@@ -281,6 +298,9 @@ class ReplayWindow(QMainWindow):
     open_action.setShortcut("Ctrl+O")
     open_action.triggered.connect(self.choose_drive)
     file_menu.addAction(open_action)
+    export_action = QAction("Export rendered MP4…", self)
+    export_action.triggered.connect(self.export_mp4)
+    file_menu.addAction(export_action)
 
     self.timer = QTimer(self)
     self.timer.setInterval(50)
@@ -300,6 +320,27 @@ class ReplayWindow(QMainWindow):
     selected = QFileDialog.getExistingDirectory(self, "Open telemetry drive")
     if selected:
       self.open_drive(Path(selected))
+
+  def export_mp4(self) -> None:
+    if self.drive is None:
+      QMessageBox.information(self, "No drive open", "Open a copied telemetry drive first.")
+      return
+    selected, _filter = QFileDialog.getSaveFileName(
+      self, "Export rendered MP4", str(self.drive.drive_directory.with_suffix(".mp4")), "MP4 video (*.mp4)")
+    if not selected:
+      return
+    output = Path(selected)
+    if output.suffix.lower() != ".mp4":
+      output = output.with_suffix(".mp4")
+    QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+    try:
+      frames = render_drive_mp4(self.drive, output)
+    except (ExportFailure, OSError) as error:
+      QMessageBox.critical(self, "Export failed", str(error))
+      return
+    finally:
+      QApplication.restoreOverrideCursor()
+    QMessageBox.information(self, "Export complete", f"Rendered {frames:,} frames to:\n{output}")
 
   def open_drive(self, directory: Path) -> None:
     try:
@@ -331,6 +372,7 @@ class ReplayWindow(QMainWindow):
     available_videos = sum(video.local_path is not None for video in drive.videos)
     self.statistics_page.set_summary(summary, available_videos, len(drive.videos))
     self.route.set_points(summary.gps_route)
+    self.open_osm_button.setEnabled(bool(summary.gps_route))
     self._set_position(0.0, force_video=True)
     self.setWindowTitle(f"Comma Telemetry Replay — {directory.name}")
 
@@ -349,6 +391,20 @@ class ReplayWindow(QMainWindow):
     else:
       self.synthetic_playing = True
     self.play_button.setText("Pause")
+
+  def open_route_in_osm(self) -> None:
+    if self.drive is None:
+      return
+    route = self.drive.summary().gps_route
+    if not route:
+      return
+    start = route[0]
+    end = route[-1]
+    url = QUrl(
+      "https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=" +
+      f"{start[0]:.6f}%2C{start[1]:.6f}%3B{end[0]:.6f}%2C{end[1]:.6f}"
+    )
+    QDesktopServices.openUrl(url)
 
   def _video_at(self, seconds: float) -> VideoSegment | None:
     if self.drive is None:
@@ -390,7 +446,12 @@ class ReplayWindow(QMainWindow):
     self.current_seconds = max(0.0, min(self.drive.duration_seconds, seconds))
     if not self.scrubbing:
       self.timeline.setValue(round(self.current_seconds * 1000))
-    self.canvas.hud.set_sample(self.drive.sample_at_seconds(self.current_seconds), self.current_seconds)
+    sample = self.drive.sample_at_seconds(self.current_seconds)
+    self.canvas.hud.set_sample(sample, self.current_seconds, self.drive.path_at_seconds(self.current_seconds))
+    if sample and sample.get("gps_has_fix") and sample.get("gps_latitude") is not None:
+      self.route.set_current_point((float(sample["gps_latitude"]), float(sample["gps_longitude"])))
+    else:
+      self.route.set_current_point(None)
     self.position_label.setText(
       f"{self._format_time(self.current_seconds)} / {self._format_time(self.drive.duration_seconds)}")
     video = self._video_at(self.current_seconds)
@@ -408,7 +469,10 @@ class ReplayWindow(QMainWindow):
       return
     seconds = value / 1000
     self.current_seconds = seconds
-    self.canvas.hud.set_sample(self.drive.sample_at_seconds(seconds), seconds)
+    sample = self.drive.sample_at_seconds(seconds)
+    self.canvas.hud.set_sample(sample, seconds, self.drive.path_at_seconds(seconds))
+    if sample and sample.get("gps_has_fix") and sample.get("gps_latitude") is not None:
+      self.route.set_current_point((float(sample["gps_latitude"]), float(sample["gps_longitude"])))
     self.position_label.setText(f"{self._format_time(seconds)} / {self._format_time(self.drive.duration_seconds)}")
 
   def _scrub_finished(self) -> None:

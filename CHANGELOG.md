@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased — Phase 3 Toyota hybrid owner-test build
+
+Status: prepared on `codex/phase3-toyota-hybrid` and intended for upload without a tag, release, or
+pull request. Phase 1 remains on `tskdash`; Phase 2 remains on `codex/phase2-desktop-replay`.
+
+### Toyota and TSS
+
+- Read-only decode of allowlisted signals already present in the selected Toyota DBC: engine RPM,
+  engine-running state, signed hybrid drive force, and LTA state
+- EV mode derived only from a fresh engine signal
+- Signed wheel-power calculation, with motion-derived fallback visibly marked `EST`
+- TSS status distinguishes actively engaged radar cruise and LTA from manual city driving
+- Hybrid battery percentage stays unavailable until a verified 2025 Corolla Hybrid mapping exists
+
+### Replay and export
+
+- Openpilot-style path ribbon from recorded `modelV2` trajectory data
+- Moving GPS route marker and explicit OpenStreetMap browser link
+- Local FFmpeg-based rendered MP4 export with synchronized HUD and path
+- Telemetry schema v2 with backward-compatible schema v1 replay
+
+### Platform app branches
+
+- `codex/phase3-windows-app`
+- `codex/phase3-macos-app`
+- `codex/phase3-linux-app`
+
+Each platform branch contains lightweight import/view launchers and a PyInstaller build script over
+the same audited Python core. None is a published release or signed binary.
+
 ## Unreleased — planned `v0.1.1-alpha.1` (Phase 2)
 
 Status: uploaded to `codex/phase2-desktop-replay` for owner testing, but not published as a GitHub

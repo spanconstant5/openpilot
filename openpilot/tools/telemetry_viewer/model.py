@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 
-SUPPORTED_SCHEMA_VERSION = 1
+SUPPORTED_SCHEMA_VERSION = 2
 MARKER_KINDS = {"driver_distraction", "brake_override", "steering_override", "engagement", "alert"}
 
 
@@ -30,6 +30,15 @@ class VideoSegment:
   first_mono_ns: int
   last_mono_ns: int
   local_path: Path | None
+
+
+@dataclass(frozen=True)
+class ModelPath:
+  mono_time_ns: int
+  frame_id: int | None
+  x: list[float]
+  y: list[float]
+  z: list[float]
 
 
 @dataclass(frozen=True)
@@ -69,7 +78,7 @@ def _resolve_video(drive_directory: Path, relative_path: str) -> Path | None:
 
 class DriveData:
   def __init__(self, drive_directory: Path, manifest: dict[str, Any], metadata: dict[str, Any], samples: list[dict[str, Any]],
-               events: list[Event], videos: list[VideoSegment]):
+               events: list[Event], videos: list[VideoSegment], paths: list[ModelPath] | None = None):
     self.drive_directory = drive_directory
     self.manifest = manifest
     self.metadata = metadata
@@ -77,6 +86,8 @@ class DriveData:
     self.sample_times = [int(sample["mono_time_ns"]) for sample in self.samples]
     self.events = sorted(events, key=lambda event: event.mono_time_ns)
     self.videos = sorted(videos, key=lambda video: video.first_mono_ns)
+    self.paths = sorted(paths or [], key=lambda path: path.mono_time_ns)
+    self.path_times = [path.mono_time_ns for path in self.paths]
     self.start_mono_ns = self.sample_times[0] if self.sample_times else 0
     self.end_mono_ns = self.sample_times[-1] if self.sample_times else 0
 
@@ -95,6 +106,7 @@ class DriveData:
 
     samples: list[dict[str, Any]] = []
     events: list[Event] = []
+    paths: list[ModelPath] = []
     for segment in manifest.get("segments", []):
       if segment.get("status") != "complete":
         continue
@@ -107,6 +119,15 @@ class DriveData:
           details = json.loads(row["details_json"]) if row.get("details_json") else None
           events.append(Event(int(row["mono_time_ns"]), int(row["wall_time_ms"]), str(row["kind"]),
                               row.get("value"), row.get("severity"), details))
+        for row in _read_rows(connection, "model_paths"):
+          try:
+            x = [float(value) for value in json.loads(row["x_json"])]
+            y = [float(value) for value in json.loads(row["y_json"])]
+            z = [float(value) for value in json.loads(row["z_json"])]
+          except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+          if x and len(x) == len(y) == len(z):
+            paths.append(ModelPath(int(row["mono_time_ns"]), row.get("frame_id"), x, y, z))
 
     videos = []
     for item in manifest.get("video_segments", []):
@@ -119,7 +140,7 @@ class DriveData:
         last_mono_ns=int(item.get("last_mono_ns", item.get("first_mono_ns", 0))),
         local_path=_resolve_video(drive_directory, relative_path),
       ))
-    return cls(drive_directory, manifest, metadata, samples, events, videos)
+    return cls(drive_directory, manifest, metadata, samples, events, videos, paths)
 
   @property
   def duration_seconds(self) -> float:
@@ -139,6 +160,21 @@ class DriveData:
 
   def sample_at_seconds(self, seconds: float) -> dict[str, Any] | None:
     return self.nearest_sample(self.start_mono_ns + int(max(0.0, seconds) * 1e9))
+
+  def nearest_path(self, mono_time_ns: int) -> ModelPath | None:
+    if not self.paths:
+      return None
+    index = bisect.bisect_left(self.path_times, mono_time_ns)
+    if index == 0:
+      return self.paths[0]
+    if index == len(self.paths):
+      return self.paths[-1]
+    before = self.path_times[index - 1]
+    after = self.path_times[index]
+    return self.paths[index - 1 if mono_time_ns - before <= after - mono_time_ns else index]
+
+  def path_at_seconds(self, seconds: float) -> ModelPath | None:
+    return self.nearest_path(self.start_mono_ns + int(max(0.0, seconds) * 1e9))
 
   def video_for_mono_time(self, mono_time_ns: int) -> VideoSegment | None:
     if not self.videos:

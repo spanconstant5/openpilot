@@ -1,8 +1,8 @@
 # Toyota signal policy
 
-This project does not parse CAN in the HUD or telemetry process. Toyota values must first be decoded,
-reviewed, and tested in opendbc, then exposed through CarState. The UI provider in
-`openpilot/selfdrive/ui/onroad/dashcam_provider.py` only consumes those public fields.
+The live HUD consumes public CarState fields only. Phase 3's recorder may additionally subscribe to
+the existing read-only `can` service and ask the already-selected Toyota opendbc DBC to decode a
+small allowlist. It never transmits CAN, guesses addresses, or changes vehicle-control behavior.
 
 ## Used in v0.1.0-alpha.1
 
@@ -31,3 +31,21 @@ Until those tasks are complete, provider methods return unavailable and the HUD 
 Contributors must document DBC messages, scaling, platform applicability, counter/checksum handling,
 and replay tests in the opendbc change. Adding guessed addresses directly to this repository is not
 accepted.
+
+## Phase 3 allowlist
+
+| Display | Reviewed DBC signal | Behavior |
+| --- | --- | --- |
+| RPM / engine running | `ENGINE_RPM.RPM`, `ENGINE_RPM.ENGINE_RUNNING` | hidden when stale or absent |
+| EV mode | derived only from the fresh engine-running/RPM signal | `EV MODE` means the engine is off |
+| Power flow | `GEAR_PACKET_HYBRID.FDRVREAL × vEgo` | signed wheel power; acceleration-based fallback is marked `EST` |
+| LTA active | `EPS_STATUS.LTA_STATE == 5` | contributes to TSS status only while actively engaged |
+| Radar cruise active | `cruiseState.enabled` | contributes to TSS status only while actively engaged |
+
+`TSS ACTIVE · RADAR + LTA` is reserved for the highway-style state where both systems are engaged.
+Radar-only and LTA-only activity are named explicitly. Ordinary manual city driving displays
+`TSS READY` when the systems are available or `TSS OFF` when unavailable. Driver pedal/steering
+override is a separate orange warning and does not change the TSS state.
+
+No verified traction-battery SOC field for the 2025 Corolla Hybrid exists in this checkout, so the
+battery value intentionally remains unavailable pending a route capture and reviewed DBC mapping.

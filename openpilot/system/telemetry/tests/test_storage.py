@@ -20,6 +20,8 @@ def test_schema_creation(tmp_path):
     status, drive_id = connection.execute("SELECT status, drive_id FROM segment_metadata").fetchone()
     assert status == "complete"
     assert drive_id == "drive_001"
+    sample_columns = {row[1] for row in connection.execute("PRAGMA table_info(samples)")}
+    assert {"engine_running", "ev_mode", "power_flow_kw", "lta_active", "tss_status"} <= sample_columns
 
 
 def test_rotation_marks_only_closed_segments_complete(tmp_path):

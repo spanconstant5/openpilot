@@ -78,8 +78,14 @@ class ToyotaSignalProvider(GenericSignalProvider):
   def stock_assistance_state(self, car_state) -> str | None:
     if car_state.stockAeb:
       return "TSS AEB"
-    if car_state.cruiseState.enabled:
-      return "TSS CRUISE ACTIVE"
+    radar_active = bool(car_state.cruiseState.enabled)
+    lta_active = bool(getattr(car_state, "stockLkas", False))
+    if radar_active and lta_active:
+      return "TSS ACTIVE · RADAR + LTA"
+    if radar_active:
+      return "TSS RADAR CRUISE ACTIVE"
+    if lta_active:
+      return "TSS LTA ACTIVE"
     if car_state.cruiseState.available:
       return "TSS READY"
     return "TSS OFF"

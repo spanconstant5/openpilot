@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from typing import Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
+
+from openpilot.tools.telemetry_viewer.model import ModelPath
 
 
 WHITE = QColor(255, 255, 255, 245)
@@ -26,12 +29,15 @@ class HudOverlay(QWidget):
     self.sample: dict[str, Any] = {}
     self.vehicle_brand: str | None = None
     self.elapsed_seconds = 0.0
+    self.model_path: ModelPath | None = None
     self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
     self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-  def set_sample(self, sample: dict[str, Any] | None, elapsed_seconds: float) -> None:
+  def set_sample(self, sample: dict[str, Any] | None, elapsed_seconds: float,
+                 model_path: ModelPath | None = None) -> None:
     self.sample = sample or {}
     self.elapsed_seconds = elapsed_seconds
+    self.model_path = model_path
     self.update()
 
   @staticmethod
@@ -111,15 +117,14 @@ class HudOverlay(QWidget):
     engaged = bool(self.sample.get("engaged"))
     override = bool(self.sample.get("steering_pressed") or self.sample.get("gas_pressed") or self.sample.get("brake_pressed"))
     if self.vehicle_brand == "toyota":
-      if self.sample.get("stock_aeb"):
-        state = "TSS AEB"
-      elif self.sample.get("cruise_enabled"):
-        state = "TSS CRUISE ACTIVE"
-      else:
-        state = "TSS READY" if self.sample.get("cruise_available") else "TSS OFF"
+      state = str(self.sample.get("tss_status") or (
+        "TSS RADAR CRUISE ACTIVE" if self.sample.get("cruise_enabled") else
+        "TSS READY" if self.sample.get("cruise_available") else "TSS OFF"
+      ))
     else:
       state = "ENGAGED" if engaged else "STANDBY"
-    color = GREEN if engaged or self.sample.get("cruise_enabled") else MUTED
+    assist_active = bool(self.sample.get("cruise_enabled") or self.sample.get("lta_active") or self.sample.get("stock_aeb"))
+    color = GREEN if engaged or assist_active else MUTED
     painter.setFont(self._font(22 * scale, True))
     painter.setPen(WHITE)
     painter.drawText(QRectF(box.x() + 16 * scale, box.y() + 10 * scale, box.width(), 28 * scale), "ASSIST")
@@ -131,12 +136,67 @@ class HudOverlay(QWidget):
       painter.setPen(ORANGE)
       painter.drawText(QRectF(box.x(), box.bottom() + 3 * scale, box.width(), 18 * scale),
                        Qt.AlignmentFlag.AlignRight, "! DRIVER OVERRIDE")
+
+  def _draw_hybrid(self, painter: QPainter, width: float, scale: float) -> None:
+    if self.vehicle_brand != "toyota":
+      return
+    box = QRectF(width - 275 * scale, 140 * scale, 240 * scale, 114 * scale)
+    self._panel(painter, box, 12 * scale)
+    battery = self._value(self.sample, "hybrid_battery_percent")
     rpm = self._value(self.sample, "engine_rpm")
-    if rpm is not None:
-      painter.setFont(self._font(18 * scale))
-      painter.setPen(WHITE)
-      painter.drawText(QRectF(box.x(), box.bottom() + 9 * scale, box.width(), 25 * scale),
-                       Qt.AlignmentFlag.AlignRight, f"{round(rpm)} rpm")
+    power = self._value(self.sample, "power_flow_kw")
+    ev_mode = self.sample.get("ev_mode")
+    painter.setFont(self._font(17 * scale, True))
+    painter.setPen(WHITE)
+    painter.drawText(QRectF(box.x() + 14 * scale, box.y() + 8 * scale, box.width() - 28 * scale, 22 * scale), "HYBRID")
+    painter.setFont(self._font(15 * scale))
+    painter.setPen(MUTED)
+    battery_text = f"Battery {battery:.0f}%" if battery is not None else "Battery --"
+    painter.drawText(QRectF(box.x() + 14 * scale, box.y() + 35 * scale, box.width() - 28 * scale, 20 * scale), battery_text)
+    mode_text = "EV MODE" if ev_mode is True else "ENGINE" if ev_mode is False else "Mode --"
+    painter.setPen(GREEN if ev_mode is True else WHITE if ev_mode is False else MUTED)
+    painter.drawText(QRectF(box.x() + 14 * scale, box.y() + 60 * scale, 90 * scale, 20 * scale), mode_text)
+    painter.setPen(WHITE)
+    rpm_text = f"{round(rpm)} rpm" if rpm is not None else "-- rpm"
+    painter.drawText(QRectF(box.x() + 104 * scale, box.y() + 60 * scale, 120 * scale, 20 * scale),
+                     Qt.AlignmentFlag.AlignRight, rpm_text)
+    source = str(self.sample.get("power_flow_source") or "")
+    source_text = " EST" if source == "estimated_traction" else ""
+    power_text = f"Power {power:+.1f} kW{source_text}" if power is not None else "Power --"
+    painter.setPen(BLUE if power is not None and power < 0 else GREEN if power is not None else MUTED)
+    painter.drawText(QRectF(box.x() + 14 * scale, box.y() + 85 * scale, box.width() - 28 * scale, 20 * scale), power_text)
+
+  def _draw_model_path(self, painter: QPainter, width: float, height: float, scale: float) -> None:
+    path = self.model_path
+    if path is None or len(path.x) < 2:
+      return
+    center_x = width / 2.0
+    horizon_y = height * 0.42
+    bottom_y = height - 152 * scale
+    left: list[QPointF] = []
+    right: list[QPointF] = []
+    for forward, lateral in zip(path.x, path.y, strict=False):
+      if not math.isfinite(forward) or not math.isfinite(lateral) or forward < 0.0 or forward > 70.0:
+        continue
+      distance = min(forward / 70.0, 1.0)
+      screen_y = bottom_y - distance * (bottom_y - horizon_y)
+      perspective = 0.28 + 0.72 * (1.0 - distance)
+      lateral_scale = 30.0 * scale * perspective
+      center = center_x - lateral * lateral_scale
+      half_width = 1.25 * lateral_scale
+      left.append(QPointF(center - half_width, screen_y))
+      right.append(QPointF(center + half_width, screen_y))
+    if len(left) < 2:
+      return
+    ribbon = QPainterPath(left[0])
+    for point in left[1:]:
+      ribbon.lineTo(point)
+    for point in reversed(right):
+      ribbon.lineTo(point)
+    ribbon.closeSubpath()
+    painter.setPen(QPen(QColor(112, 207, 78, 205), max(1.0, 2.0 * scale)))
+    painter.setBrush(QColor(112, 207, 78, 82))
+    painter.drawPath(ribbon)
 
   def _draw_driver(self, painter: QPainter, height: float, scale: float) -> None:
     if self.sample.get("driver_distracted") is None and self.sample.get("driver_face_detected") is None:
@@ -185,6 +245,7 @@ class HudOverlay(QWidget):
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     width, height = float(self.width()), float(self.height())
     scale = min(width / 1280.0, height / 720.0)
+    self._draw_model_path(painter, width, height, scale)
     gradient = QPainterPath()
     gradient.addRect(QRectF(0, height - 260 * scale, width, 260 * scale))
     painter.fillPath(gradient, QColor(0, 0, 0, 122))
@@ -206,5 +267,6 @@ class HudOverlay(QWidget):
                        bool(self.sample.get("brake_pressed")), RED, scale, "TSS AEB" if tss_aeb else None)
     self._draw_steering(painter, width, height, scale)
     self._draw_assist(painter, width, scale)
+    self._draw_hybrid(painter, width, scale)
     self._draw_driver(painter, height, scale)
     self._draw_footer(painter, width, height, scale)

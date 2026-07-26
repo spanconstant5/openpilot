@@ -11,9 +11,11 @@ from opendbc.car.structs import car
 from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper
 from openpilot.common.swaglog import cloudlog
+from openpilot.selfdrive.pandad import can_capnp_to_list
 from openpilot.system.hardware import PC
 
 from .storage import SegmentClock, TelemetryStorage
+from .toyota_decoder import ToyotaExtras, ToyotaExtrasDecoder, derive_ev_mode, tss_status
 
 
 SAMPLE_RATE_HZ = 20
@@ -47,13 +49,25 @@ class TelemetryRecorder:
     self.sm = messaging.SubMaster(list(SERVICES))
     self.params = Params()
     metadata: dict[str, Any] = {"sample_rate_hz": SAMPLE_RATE_HZ}
+    self.toyota_decoder: ToyotaExtrasDecoder | None = None
+    self.toyota_extras = ToyotaExtras()
+    self.can_sock = None
+    self.vehicle_mass_kg: float | None = None
     car_params = self.params.get("CarParamsPersistent")
     if car_params is not None:
       try:
         CP = messaging.log_from_bytes(car_params, car.CarParams)
-        metadata.update({"vehicle_brand": str(CP.brand), "car_fingerprint": str(CP.carFingerprint)})
+        self.vehicle_mass_kg = float(CP.mass) if CP.mass > 0 else None
+        metadata.update({
+          "vehicle_brand": str(CP.brand),
+          "car_fingerprint": str(CP.carFingerprint),
+          "vehicle_mass_kg": self.vehicle_mass_kg,
+        })
+        if str(CP.brand).lower() == "toyota":
+          self.toyota_decoder = ToyotaExtrasDecoder(CP)
+          self.can_sock = messaging.sub_sock("can", conflate=False, timeout=0)
       except Exception:
-        cloudlog.exception("telemetryd could not read CarParamsPersistent")
+        cloudlog.exception("telemetryd could not initialize vehicle telemetry")
     start = SegmentClock(time.monotonic_ns(), time.time_ns() // 1_000_000)
     self.storage = TelemetryStorage(telemetry_root(), start=start, metadata=metadata)
     self.running = True
@@ -92,6 +106,16 @@ class TelemetryRecorder:
     self.last_event_values[kind] = value
     self.storage.write_event(clock, kind, str(value), severity, details)
 
+  def _update_toyota_extras(self, now_ns: int) -> None:
+    if self.toyota_decoder is None or self.can_sock is None:
+      return
+    try:
+      raw_messages = messaging.drain_sock_raw(self.can_sock, wait_for_one=False)
+      self.toyota_extras = self.toyota_decoder.update(can_capnp_to_list(raw_messages), now_ns)
+    except Exception:
+      cloudlog.exception("telemetryd Toyota read-only decoder failed")
+      self.toyota_extras = ToyotaExtras()
+
   def _extract_sample(self, clock: SegmentClock) -> dict[str, Any]:
     sample: dict[str, Any] = {}
     if self.sm.valid["carState"]:
@@ -99,7 +123,26 @@ class TelemetryRecorder:
       legacy = car_state.deprecated
       gas = float(legacy.gas)
       brake = float(legacy.brake)
-      engine_rpm = float(legacy.engineRpm)
+      legacy_engine_rpm = float(legacy.engineRpm)
+      engine_rpm = self.toyota_extras.engine_rpm
+      if engine_rpm is None and legacy_engine_rpm > 0:
+        engine_rpm = legacy_engine_rpm
+      engine_running = self.toyota_extras.engine_running
+      ev_mode = derive_ev_mode(engine_rpm, engine_running)
+      drive_force = self.toyota_extras.hybrid_drive_force_n
+      power_flow_kw: float | None = None
+      power_flow_source: str | None = None
+      if drive_force is not None:
+        power_flow_kw = drive_force * float(car_state.vEgo) / 1000.0
+        power_flow_source = "dbc_wheel_force"
+      elif self.vehicle_mass_kg is not None and abs(float(car_state.vEgo)) > 0.5:
+        power_flow_kw = self.vehicle_mass_kg * float(car_state.aEgo) * float(car_state.vEgo) / 1000.0
+        power_flow_source = "estimated_traction"
+      lta_active = self.toyota_extras.lta_active
+      assist_status = tss_status(
+        bool(car_state.cruiseState.available), bool(car_state.cruiseState.enabled), lta_active,
+        bool(car_state.stockAeb),
+      )
       sample.update({
         "v_ego_mps": float(car_state.vEgo),
         "a_ego_mps2": float(car_state.aEgo),
@@ -110,13 +153,22 @@ class TelemetryRecorder:
         "gas_pressed": bool(car_state.gasPressed),
         "brake": brake if brake > 0 else None,
         "brake_pressed": bool(car_state.brakePressed),
-        "engine_rpm": engine_rpm if engine_rpm > 0 else None,
+        "engine_rpm": engine_rpm,
+        "engine_running": engine_running,
+        "hybrid_battery_percent": None,
+        "ev_mode": ev_mode,
+        "power_flow_kw": power_flow_kw,
+        "power_flow_source": power_flow_source,
+        "hybrid_drive_force_n": drive_force,
         "stock_aeb": bool(car_state.stockAeb),
         "cruise_available": bool(car_state.cruiseState.available),
         "cruise_enabled": bool(car_state.cruiseState.enabled),
+        "lta_active": lta_active,
+        "tss_status": assist_status,
       })
       self._record_change(clock, "brake_override", bool(car_state.brakePressed))
       self._record_change(clock, "steering_override", bool(car_state.steeringPressed))
+      self._record_change(clock, "tss_status", assist_status)
 
     if self.sm.valid["selfdriveState"]:
       selfdrive = self.sm["selfdriveState"]
@@ -189,6 +241,7 @@ class TelemetryRecorder:
         self.sm.update(0)
         clock = SegmentClock(time.monotonic_ns(), time.time_ns() // 1_000_000)
         self._update_gps()
+        self._update_toyota_extras(clock.mono_ns)
         self._update_video_association(clock)
         self.storage.write_sample(self._extract_sample(clock), clock)
         self._record_model_path(clock)

@@ -20,7 +20,13 @@ playback still works when video or a codec is absent.
 
 The **Replay** page includes timeline markers for distraction, brake/steering override, engagement
 changes, and alerts. Its side panel reports the drive summary, video availability, and a simple
-offline GPS trace.
+offline GPS trace. A moving marker follows the current point. **Open route in OpenStreetMap** is an
+explicit external-browser action; the viewer never downloads map tiles automatically.
+
+Phase 3 also displays a translucent path ribbon from the recorded openpilot `modelV2` trajectory,
+Toyota hybrid fields when present, and a compact numeric RPM readout. Select **File → Export
+rendered MP4…** to burn the synchronized HUD into a new H.264 MP4. Export requires the `ffmpeg`
+and `ffprobe` executables on `PATH`; source video and telemetry stay local.
 
 The dedicated **Statistics** page reports distance, duration, average and maximum speed, assist
 engagement time, distracted time, driver-override time, GPS coverage, telemetry sample count,
