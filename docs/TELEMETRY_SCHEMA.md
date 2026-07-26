@@ -58,3 +58,8 @@ table contains associations only; no video bytes are stored in SQLite.
 Databases use WAL mode, `synchronous=NORMAL`, one-second commits, an explicit final checkpoint, and
 atomic JSON replacement. Startup `quick_check` recovery finalizes a healthy database left active by
 an unexpected shutdown.
+
+When a known panda reports both `ignitionLine` and `ignitionCan` off, the recorder immediately
+commits, checkpoints, and marks the active segment complete with close reason `ignition_off`.
+Recording remains paused while ignition is off and opens a new segment if ignition returns before
+the manager restarts the process. Missing or unknown panda state never triggers this transition.
