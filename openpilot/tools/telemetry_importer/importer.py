@@ -13,6 +13,7 @@ from openpilot.tools.telemetry_importer.selection import CopyItem, needs_copy, s
 
 
 REMOTE_ROOT = PurePosixPath("/data/media/0/telemetry")
+DEFAULT_ADB_ENDPOINT = "192.168.43.1:5555"
 
 
 class ImportFailure(RuntimeError):
@@ -26,6 +27,10 @@ def find_adb(explicit: Path | None = None) -> Path:
   module_path = Path(__file__).resolve()
   repository_root = module_path.parents[3]
   candidates.extend((module_path.parent / "adb.exe", repository_root / "tools" / "telemetry_importer" / "adb.exe"))
+  local_app_data = os.environ.get("LOCALAPPDATA")
+  if local_app_data:
+    winget_root = Path(local_app_data) / "Microsoft" / "WinGet" / "Packages"
+    candidates.extend(winget_root.glob("Google.PlatformTools_*/platform-tools/adb.exe"))
   from_path = shutil.which("adb") or shutil.which("adb.exe")
   if from_path:
     candidates.append(Path(from_path))
@@ -47,15 +52,31 @@ def run_adb(adb: Path, serial: str | None, arguments: list[str], binary: bool = 
   return result.stdout if binary else result.stdout.decode("utf-8", errors="replace")
 
 
-def connected_device(adb: Path) -> str:
-  output = str(run_adb(adb, None, ["devices"]))
+def _device_states(output: str) -> tuple[list[str], list[str]]:
   lines = [line.split() for line in output.splitlines()[1:] if line.strip()]
   authorized = [parts[0] for parts in lines if len(parts) >= 2 and parts[1] == "device"]
   unauthorized = [parts[0] for parts in lines if len(parts) >= 2 and parts[1] == "unauthorized"]
+  return authorized, unauthorized
+
+
+def connected_device(adb: Path, network_endpoint: str = DEFAULT_ADB_ENDPOINT) -> str:
+  authorized, unauthorized = _device_states(str(run_adb(adb, None, ["devices"])))
   if unauthorized:
-    raise ImportFailure("The comma device is unauthorized. Accept the USB debugging prompt, then try again.")
-  if not authorized:
-    raise ImportFailure("No authorized comma device was found. Connect USB and verify `adb devices`.")
+    raise ImportFailure("The comma is visible but unauthorized. Accept its ADB authorization prompt, then try again.")
+  if not authorized and network_endpoint:
+    print(f"No USB ADB device found; trying {network_endpoint}...")
+    try:
+      run_adb(adb, None, ["connect", network_endpoint])
+    except ImportFailure:
+      pass
+    authorized, unauthorized = _device_states(str(run_adb(adb, None, ["devices"])))
+    if unauthorized:
+      raise ImportFailure("The comma is visible but unauthorized. Accept its ADB authorization prompt, then try again.")
+    if not authorized:
+      raise ImportFailure(
+      "No comma was detected by USB or network ADB. On comma 3X/four, enable ADB, power port 2, " +
+      "connect the PC with a data cable to port 1, or join the comma network/tether and retry."
+    )
   if len(authorized) != 1:
     raise ImportFailure(f"Expected one comma device, found {len(authorized)}. Disconnect extra ADB devices.")
   return authorized[0]
@@ -150,11 +171,13 @@ def default_destination() -> Path:
 def main() -> None:
   parser = argparse.ArgumentParser(description="Import completed comma telemetry and associated road video")
   parser.add_argument("--adb", type=Path, help="path to adb.exe")
+  parser.add_argument("--adb-endpoint", default=DEFAULT_ADB_ENDPOINT,
+                      help="network ADB endpoint tried when no USB device is visible; pass an empty value to disable")
   parser.add_argument("--destination", type=Path, default=None, help="import root")
   args = parser.parse_args()
   try:
     adb = find_adb(args.adb)
-    serial = connected_device(adb)
+    serial = connected_device(adb, args.adb_endpoint)
     destination = args.destination or default_destination()
     destination.mkdir(parents=True, exist_ok=True)
     manifests = remote_manifests(adb, serial)
