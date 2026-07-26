@@ -5,6 +5,10 @@ comma 3, comma 3X, and comma 4. It adds a low-overhead live HUD, segmented SQLit
 Windows ADB import, and a desktop replay viewer. It does **not** add autonomous-driving or
 vehicle-control behavior, and it reuses openpilot's existing encoded road video.
 
+This project is specifically for Toyota Security Key (TSK) owners who want useful dashcam and
+telemetry features while the broader TSK support path is still being solved. It is not itself a
+TSK bypass, key extractor, or replacement for reviewed openpilot/opendbc TSK support.
+
 The HUD keeps speed bottom-center, **Throttle** and **Brake** bars bottom-left, a steering-angle
 scale bottom-right, driver status at left, assistance status at upper-right, and only a compact
 numeric RPM value. The comma 4 uses a purpose-built compact layout. Toyota vehicles display
@@ -24,6 +28,10 @@ Start here:
 Recordings can include location, vehicle activity, alerts, and driver-monitoring measurements.
 Treat copied drives as sensitive. This alpha has desktop validation only until owners complete the
 hardware checklist in the installation guide.
+
+Repository status: owner-maintained testing alpha. External write access is disabled and protected
+branches require `@spanconstant5` code-owner review. Issues and hardware test reports are welcome;
+outside changes are not being accepted until the initial device-validation period is complete.
 
 ---
 
