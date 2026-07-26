@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=TSKDash Viewer
+Comment=View imported comma telemetry and road footage
+Exec=tskdash-viewer
+Terminal=false
+Categories=AudioVideo;Utility;
