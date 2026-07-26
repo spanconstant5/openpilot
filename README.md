@@ -1,3 +1,34 @@
+# comma dashcam telemetry
+
+`v0.1.0-alpha.1` turns this openpilot fork into a read-only dashcam and telemetry platform for
+comma 3, comma 3X, and comma 4. It adds a low-overhead live HUD, segmented SQLite telemetry,
+Windows ADB import, and a desktop replay viewer. It does **not** add autonomous-driving or
+vehicle-control behavior, and it reuses openpilot's existing encoded road video.
+
+The HUD keeps speed bottom-center, **Throttle** and **Brake** bars bottom-left, a steering-angle
+scale bottom-right, driver status at left, assistance status at upper-right, and only a compact
+numeric RPM value. The comma 4 uses a purpose-built compact layout. Toyota vehicles display
+already-decoded TSS cruise/AEB state; driver input is colored orange and marked as an override.
+Unavailable values are hidden rather than synthesized.
+
+Start here:
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [Install on comma 3/3X or comma 4](docs/INSTALL_COMMA.md)
+- [Import on Windows](docs/IMPORT_WINDOWS.md)
+- [Replay viewer](docs/REPLAY_VIEWER.md)
+- [Telemetry schema](docs/TELEMETRY_SCHEMA.md)
+- [Known limitations](docs/KNOWN_LIMITATIONS.md)
+- [Toyota signal policy](docs/TOYOTA_SIGNALS.md)
+
+Recordings can include location, vehicle activity, alerts, and driver-monitoring measurements.
+Treat copied drives as sensitive. This alpha has desktop validation only until owners complete the
+hardware checklist in the installation guide.
+
+---
+
+The remainder of this README is the upstream openpilot documentation retained by the fork.
+
 <div align="center" style="text-align: center;">
 
 <h1>openpilot</h1>

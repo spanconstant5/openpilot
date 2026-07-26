@@ -9,7 +9,7 @@ pipeline remains authoritative for camera video and openpilot logs.
 
 The implementation has four independent pieces:
 
-1. `system.telemetry.telemetryd` subscribes to existing cereal services and writes
+1. `openpilot.system.telemetry.recorder` (`telemetryd`) subscribes to existing cereal services and writes
    a second, deliberately small SQLite data set.
 2. `HudRenderer` paints the live overlay after the existing camera and model-path
    renderers have drawn. Nothing is burned into recorded video.
@@ -34,6 +34,17 @@ UI SubMaster --> camera --> model path --> HUD paint (display only)
                           +---- ADB importer ---- desktop viewer
 ```
 
+## Supported UI targets
+
+This feature branch is rebased onto current upstream openpilot so it uses the official comma four
+support rather than the fork's February 2025 base. One shared read-only HUD layer is integrated in
+both renderers:
+
+- comma 3/3X (`tici`/`tizi`): `openpilot/selfdrive/ui/onroad/hud_renderer.py`;
+- comma 4 (`mici`): `openpilot/selfdrive/ui/mici/onroad/hud_renderer.py`.
+
+The large and compact layouts share signal policy and semantics but have device-specific geometry.
+
 ## Verified fork interfaces
 
 The following fields were verified in this checkout rather than inferred from a
@@ -41,10 +52,10 @@ newer upstream revision.
 
 | Service | Fields used | Rate in `cereal/services.py` |
 | --- | --- | --- |
-| `carState` | `vEgo`, `aEgo`, `gas`, `gasPressed`, `brake`, `brakePressed`, `steeringAngleDeg`, `steeringTorque`, `steeringPressed`, `engineRpm` | 100 Hz |
+| `carState` | `vEgo`, `aEgo`, pressed/override booleans, steering fields, `stockAeb`, cruise state; optional analog gas/brake/RPM under `deprecated` | 100 Hz |
 | `selfdriveState` | `state`, `enabled`, `active`, `engageable`, alert text/type/status | 100 Hz |
 | `gpsLocationExternal`, `gpsLocation` | latitude, longitude, altitude, speed, bearing, horizontal/speed accuracy, fix, wall-clock GPS time | 10 Hz / 1 Hz |
-| `driverMonitoringState` | `faceDetected`, `isDistracted`, `awarenessStatus`, active mode, right-hand-drive state | 20 Hz |
+| `driverMonitoringState` | nested `visionPolicyState.faceDetected`, `isDistracted`, `awarenessPercent`, and right-hand-drive state | 20 Hz |
 | `driverStateV2` | selected driver `faceProb` and `faceOrientation` | 20 Hz |
 | `modelV2` | predicted path `position.x/y/z`, frame id | 20 Hz |
 | `roadEncodeIdx` | encoder `segmentNum`, frame/encode ids and timestamps | 20 Hz |
@@ -54,7 +65,7 @@ updates. Change-only events are stored separately. This bounds CPU, storage, and
 SQLite transaction overhead while retaining sufficient resolution for a visual
 replay HUD.
 
-`CarState.engineRpm` exists in the fork, but not every vehicle interface populates
+`CarState.deprecated.engineRpm` exists in the fork, but not every vehicle interface populates
 it. The HUD treats RPM as available only after a positive value is observed during
 the current on-road session. It is rendered as compact text, never a tachometer.
 
@@ -139,7 +150,7 @@ reference while fitting comma's on-road surface:
 - RPM: compact numeric text only when available;
 - clock, elapsed on-road duration, and GPS fix summary: slim footer.
 
-Pressed booleans are used when analog gas/brake values are absent. Driver override
+Pressed booleans are used when analog throttle/brake values are absent. Driver override
 and system engagement use separate labels and colors. Missing values are omitted,
 not shown as synthetic zeroes.
 
@@ -184,8 +195,6 @@ explicit, and interactive.
 ## Hardware validation gates
 
 Desktop unit tests and builds cannot establish comma-device performance, GPS source
-selection, or Toyota signal availability. Before a device release, verify on a
-comma 3/3X that recorder CPU and write rates remain acceptable, shutdown leaves no
-active manifest entries, every video association opens, and the overlay is readable
-in daylight and at night. Vehicle-control behavior must be regression-tested even
-though this feature does not change its code paths.
+selection, or Toyota signal availability. Before a stable release, run the checklist on
+both UI classes: comma 3/3X and comma 4. Verify recorder CPU/write rates, clean shutdown,
+video associations, legibility, thermal behavior, and unchanged vehicle-control behavior.
