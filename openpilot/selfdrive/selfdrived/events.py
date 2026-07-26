@@ -436,23 +436,20 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventName.startupNoControl: {
-    ET.PERMANENT: StartupAlert("Dashcam mode"),
+    ET.PERMANENT: EmptyAlert,
     ET.NO_ENTRY: NoEntryAlert("Dashcam mode"),
   },
 
   EventName.startupNoCar: {
-    ET.PERMANENT: StartupAlert("Dashcam mode for unsupported car"),
+    ET.PERMANENT: EmptyAlert,
   },
 
   EventName.startupNoSecOcKey: {
-    ET.PERMANENT: NormalPermanentAlert("Dashcam Mode",
-                                       "Security Key Not Available",
-                                       priority=Priority.HIGH),
+    ET.PERMANENT: EmptyAlert,
   },
 
   EventName.dashcamMode: {
-    ET.PERMANENT: NormalPermanentAlert("Dashcam Mode",
-                                       priority=Priority.LOWEST),
+    ET.PERMANENT: EmptyAlert,
   },
 
   EventName.invalidLkasSetting: {
@@ -468,9 +465,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   # read-only mode. This can be solved by adding your fingerprint.
   # See https://github.com/commaai/openpilot/wiki/Fingerprinting for more information
   EventName.carUnrecognized: {
-    ET.PERMANENT: NormalPermanentAlert("Dashcam Mode",
-                                       "Car Unrecognized",
-                                       priority=Priority.LOWEST),
+    ET.PERMANENT: EmptyAlert,
   },
 
   EventName.aeb: {

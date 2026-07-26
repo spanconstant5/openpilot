@@ -60,6 +60,7 @@ class DashcamHudLayer(Widget):
     self.driver_override = False
     self.driver_status: str | None = None
     self.driver_color = MUTED
+    self.read_only = False
     self.gps_text: str | None = None
     self.clock_text = ""
     self.date_text = ""
@@ -69,6 +70,7 @@ class DashcamHudLayer(Widget):
 
   def _update_state(self) -> None:
     sm = ui_state.sm
+    self.read_only = bool(ui_state.CP is not None and (ui_state.CP.passive or ui_state.CP.dashcamOnly))
     brand = str(ui_state.CP.brand) if ui_state.CP is not None else None
     if not self._provider_is_explicit and brand != self._provider_brand:
       self.provider = signal_provider_for_brand(brand)
@@ -200,6 +202,9 @@ class DashcamHudLayer(Widget):
     box = rl.Rectangle(rect.x + rect.width - 530, rect.y + 38, 260, 112)
     _panel(box)
     rl.draw_text_ex(self._font_bold, "ASSIST", rl.Vector2(box.x + 22, box.y + 15), 30, 0, WHITE)
+    if self.read_only:
+      read_only_width = measure_text_cached(self._font_bold, "READ ONLY", 13).x
+      rl.draw_text_ex(self._font_bold, "READ ONLY", rl.Vector2(box.x + box.width - read_only_width - 15, box.y + 19), 13, 0, MUTED)
     rl.draw_text_ex(self._font_medium, self.assist_state, rl.Vector2(box.x + 22, box.y + 57), 28, 0, self.assist_color)
     if self.driver_override:
       rl.draw_text_ex(self._font_bold, "! DRIVER OVERRIDE", rl.Vector2(box.x + box.width + 12, box.y + 65), 16, 0, ORANGE)
@@ -254,6 +259,8 @@ class DashcamHudLayer(Widget):
     rl.draw_text_ex(self._font_bold, status, rl.Vector2(rect.x + rect.width - size.x - 5, rect.y + 5), 11, 0, status_color)
     if self.driver_override:
       rl.draw_text_ex(self._font_bold, "! DRIVER", rl.Vector2(rect.x + rect.width - 44, rect.y + 18), 7, 0, ORANGE)
+    if self.read_only:
+      rl.draw_text_ex(self._font_bold, "RO", rl.Vector2(rect.x + 4, rect.y + 5), 7, 0, MUTED)
     if self.rpm is not None:
       rpm = f"{round(self.rpm):d} rpm"
       rpm_size = measure_text_cached(self._font_medium, rpm, 10)
