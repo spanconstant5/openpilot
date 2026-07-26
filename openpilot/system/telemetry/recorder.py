@@ -13,6 +13,7 @@ from openpilot.common.realtime import Ratekeeper
 from openpilot.common.swaglog import cloudlog
 from openpilot.system.hardware import PC
 
+from .ignition import ignition_state
 from .storage import SegmentClock, TelemetryStorage
 
 
@@ -20,7 +21,7 @@ SAMPLE_RATE_HZ = 20
 MODEL_DECIMATION = 4
 SERVICES = (
   "carState", "selfdriveState", "gpsLocationExternal", "gpsLocation",
-  "driverMonitoringState", "driverStateV2", "modelV2", "roadEncodeIdx",
+  "driverMonitoringState", "driverStateV2", "modelV2", "roadEncodeIdx", "pandaStates",
 )
 
 
@@ -62,6 +63,7 @@ class TelemetryRecorder:
     self.gps: dict[str, Any] = {}
     self.road_segment_num: int | None = None
     self.road_encode_id: int | None = None
+    self.ignition_on: bool | None = None
 
   def stop(self, *_args: Any) -> None:
     self.running = False
@@ -91,6 +93,22 @@ class TelemetryRecorder:
       return
     self.last_event_values[kind] = value
     self.storage.write_event(clock, kind, str(value), severity, details)
+
+  def _update_ignition(self, clock: SegmentClock) -> bool:
+    if not self.sm.updated["pandaStates"] or not self.sm.valid["pandaStates"]:
+      return self.ignition_on is not False
+    current = ignition_state(self.sm["pandaStates"])
+    if current is None:
+      return self.ignition_on is not False
+    previous = self.ignition_on
+    self.ignition_on = current
+    if current and previous is False:
+      self.storage.resume(clock)
+      self._record_change(clock, "ignition", True)
+    elif not current and previous is not False:
+      self._record_change(clock, "ignition", False)
+      self.storage.finalize_active_segment(clock, "ignition_off")
+    return current
 
   def _extract_sample(self, clock: SegmentClock) -> dict[str, Any]:
     sample: dict[str, Any] = {}
@@ -188,6 +206,9 @@ class TelemetryRecorder:
       while self.running:
         self.sm.update(0)
         clock = SegmentClock(time.monotonic_ns(), time.time_ns() // 1_000_000)
+        if not self._update_ignition(clock):
+          ratekeeper.keep_time()
+          continue
         self._update_gps()
         self._update_video_association(clock)
         self.storage.write_sample(self._extract_sample(clock), clock)

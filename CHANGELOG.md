@@ -17,6 +17,7 @@ release. The `tskdash` branch and `v0.1.0-alpha.1` Phase 1 release are unchanged
   distraction, driver override, GPS coverage, video availability, steering range, sample count,
   route-point count, and event totals
 - Empty-drive handling that does not display a false epoch timestamp
+- Immediate SQLite commit/checkpoint when a known panda reports ignition off
 
 ### Validation
 

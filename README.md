@@ -40,6 +40,10 @@ numeric RPM value. The comma 4 uses a purpose-built compact layout. Toyota vehic
 already-decoded TSS cruise/AEB state; driver input is colored orange and marked as an override.
 Unavailable values are hidden rather than synthesized.
 
+The recorder listens to the comma's existing panda ignition state. When a known panda reports the
+car off, the active SQLite file is immediately committed, checkpointed, and marked complete before
+the normal manager shutdown; missing ignition data does not trigger a false save.
+
 Start here:
 
 - [Architecture](docs/ARCHITECTURE.md)
