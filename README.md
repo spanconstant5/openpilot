@@ -4,9 +4,10 @@
 > It has not been validated on comma hardware or in a vehicle. Expect incomplete fields and UI
 > issues; test cautiously, remain ready to take over, and report results before relying on it.
 
-> **Separate Phase 2 build:** `v0.1.1-alpha.1` adds the completed desktop replay workflow on branch
-> `codex/phase2-desktop-replay`. The comma road-test branch remains `tskdash` at the Phase 1 build,
-> so Phase 2 development does not change the software currently being tested on-device.
+> **Separate, unpublished Phase 2 build:** `v0.1.1-alpha.1` is reserved for the completed desktop
+> replay workflow on branch `codex/phase2-desktop-replay`. It is uploaded for owner testing but is
+> not a published GitHub release. The comma road-test branch remains `tskdash` at the Phase 1 build.
+> See the [changelog](CHANGELOG.md) for the exact build status and checklist.
 
 `v0.1.0-alpha.1` turns this openpilot fork into a read-only dashcam and telemetry platform for
 comma 3, comma 3X, and comma 4. It adds a low-overhead live HUD, segmented SQLite telemetry,
