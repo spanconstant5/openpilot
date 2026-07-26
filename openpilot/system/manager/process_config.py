@@ -74,6 +74,7 @@ procs = [
   DaemonProcess("manage_athenad", "openpilot.system.athena.manage_athenad", "AthenadPid"),
 
   NativeProcess("loggerd", "openpilot/system/loggerd", ["./loggerd"], logging),
+  PythonProcess("telemetryd", "openpilot.system.telemetry.recorder", logging),
   NativeProcess("encoderd", "openpilot/system/loggerd", ["./encoderd"], only_onroad),
   NativeProcess("stream_encoderd", "openpilot/system/loggerd", ["./encoderd", "--stream"], or_(and_(livestream, not_(iscar)), notcar)),
   PythonProcess("logmessaged", "openpilot.system.logmessaged", always_run),
