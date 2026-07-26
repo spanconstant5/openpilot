@@ -40,6 +40,12 @@ class DriveSummary:
   average_speed_mps: float
   maximum_speed_mps: float
   distracted_seconds: float
+  engaged_seconds: float
+  driver_override_seconds: float
+  maximum_steering_angle_deg: float
+  sample_count: int
+  gps_fix_percent: float
+  event_counts: dict[str, int]
   gps_route: list[tuple[float, float]]
 
 
@@ -146,11 +152,14 @@ class DriveData:
 
   def summary(self) -> DriveSummary:
     if not self.samples:
-      return DriveSummary(0, 0.0, 0.0, 0.0, 0.0, 0.0, [])
+      return DriveSummary(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0.0, {}, [])
     distance = 0.0
     distracted = 0.0
+    engaged = 0.0
+    driver_override = 0.0
     gps_route: list[tuple[float, float]] = []
     maximum_speed = max(float(sample.get("v_ego_mps") or 0.0) for sample in self.samples)
+    maximum_steering_angle = max(abs(float(sample.get("steering_angle_deg") or 0.0)) for sample in self.samples)
     for previous, current in zip(self.samples, self.samples[1:], strict=False):
       dt = (int(current["mono_time_ns"]) - int(previous["mono_time_ns"])) / 1e9
       if 0.0 < dt <= 1.0:
@@ -159,12 +168,22 @@ class DriveData:
         distance += (previous_speed + current_speed) * 0.5 * dt
         if previous.get("driver_distracted"):
           distracted += dt
+        if previous.get("engaged"):
+          engaged += dt
+        if previous.get("steering_pressed") or previous.get("gas_pressed") or previous.get("brake_pressed"):
+          driver_override += dt
     for sample in self.samples:
       if sample.get("gps_has_fix") and sample.get("gps_latitude") is not None and sample.get("gps_longitude") is not None:
         point = (float(sample["gps_latitude"]), float(sample["gps_longitude"]))
         if not gps_route or point != gps_route[-1]:
           gps_route.append(point)
     duration = self.duration_seconds
+    gps_fix_samples = sum(bool(sample.get("gps_has_fix")) for sample in self.samples)
+    event_counts: dict[str, int] = {}
+    for event in self.events:
+      value = str(event.value).strip().lower() if event.value is not None else ""
+      if event.kind == "alert" or value in ("", "1", "true", "on", "active"):
+        event_counts[event.kind] = event_counts.get(event.kind, 0) + 1
     return DriveSummary(
       start_wall_ms=int(self.samples[0].get("wall_time_ms") or 0),
       duration_seconds=duration,
@@ -172,5 +191,11 @@ class DriveData:
       average_speed_mps=distance / duration if duration > 0 else 0.0,
       maximum_speed_mps=maximum_speed,
       distracted_seconds=distracted,
+      engaged_seconds=engaged,
+      driver_override_seconds=driver_override,
+      maximum_steering_angle_deg=maximum_steering_angle,
+      sample_count=len(self.samples),
+      gps_fix_percent=gps_fix_samples / len(self.samples) * 100.0,
+      event_counts=event_counts,
       gps_route=gps_route,
     )

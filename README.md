@@ -4,10 +4,20 @@
 > It has not been validated on comma hardware or in a vehicle. Expect incomplete fields and UI
 > issues; test cautiously, remain ready to take over, and report results before relying on it.
 
+> **Separate Phase 2 build:** `v0.1.1-alpha.1` adds the completed desktop replay workflow on branch
+> `codex/phase2-desktop-replay`. The comma road-test branch remains `tskdash` at the Phase 1 build,
+> so Phase 2 development does not change the software currently being tested on-device.
+
 `v0.1.0-alpha.1` turns this openpilot fork into a read-only dashcam and telemetry platform for
 comma 3, comma 3X, and comma 4. It adds a low-overhead live HUD, segmented SQLite telemetry,
 Windows ADB import, and a desktop replay viewer. It does **not** add autonomous-driving or
 vehicle-control behavior, and it reuses openpilot's existing encoded road video.
+
+Phase 2 provides the Windows replay application, `Import.bat`, resumable ADB copying, SQLite
+parsing, synchronized video/HUD replay, event markers, an offline GPS trace, drive summaries, and
+a dedicated Statistics page. The Statistics page reports distance, duration, average/maximum
+speed, assist engagement, distraction and driver-override time, GPS/data/video coverage, steering
+range, and event totals.
 
 This project is specifically for Toyota Security Key (TSK) owners who want useful dashcam and
 telemetry features while the broader TSK support path is still being solved. It is not itself a

@@ -18,9 +18,14 @@ Open a folder containing `manifest.json`, or pass it on the command line. Qt use
 system's media backend; HEVC playback requires a working HEVC decoder on the PC. Telemetry-only
 playback still works when video or a codec is absent.
 
-The timeline includes markers for distraction, brake/steering override, engagement changes, and
-alerts. The summary reports date, duration, distance, average/maximum speed, distracted time, video
-availability, and a simple offline GPS trace.
+The **Replay** page includes timeline markers for distraction, brake/steering override, engagement
+changes, and alerts. Its side panel reports the drive summary, video availability, and a simple
+offline GPS trace.
+
+The dedicated **Statistics** page reports distance, duration, average and maximum speed, assist
+engagement time, distracted time, driver-override time, GPS coverage, telemetry sample count,
+video coverage, maximum steering angle, route-point count, and event-activation totals. Statistics
+are calculated locally from the imported read-only SQLite segments; no network service is used.
 
 ## Generate a safe sample
 

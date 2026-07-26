@@ -9,11 +9,11 @@ from PySide6.QtCore import QUrl, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QPainter
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
-                               QMessageBox, QPushButton, QSlider, QSplitter, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
+                               QMessageBox, QPushButton, QSlider, QSplitter, QTabWidget, QVBoxLayout, QWidget)
 
 from openpilot.tools.telemetry_viewer.hud import HudOverlay
-from openpilot.tools.telemetry_viewer.model import DriveData, Event, VideoSegment
+from openpilot.tools.telemetry_viewer.model import DriveData, DriveSummary, Event, VideoSegment
 
 
 EVENT_COLORS = {
@@ -23,6 +23,20 @@ EVENT_COLORS = {
   "engagement": QColor("#70cf4e"),
   "alert": QColor("#ffd34d"),
 }
+
+APP_STYLESHEET = " ".join((
+  "QWidget { background: #12161a; color: #f2f4f5; }",
+  "QPushButton { padding: 7px 18px; background: #263039; border-radius: 5px; }",
+  "QTabBar::tab { padding: 9px 22px; background: #1c2329; }",
+  "QTabBar::tab:selected { background: #2b363f; color: #70cf4e; }",
+  "QFrame#statisticCard { background: #1a2025; border: 1px solid #323b42; border-radius: 8px; }",
+  "QLabel#statisticTitle { color: #9da5ad; font-size: 11px; font-weight: 600; }",
+  "QLabel#statisticValue { color: #f2f4f5; font-size: 24px; font-weight: 600; }",
+  "QLabel#statisticDetail { color: #9da5ad; font-size: 11px; }",
+  "QLabel#statisticsHeading { font-size: 28px; font-weight: 600; }",
+  "QLabel#statisticsDate { color: #9da5ad; margin-bottom: 12px; }",
+  "QLabel#statisticsPanel { background: #1a2025; border: 1px solid #323b42; border-radius: 8px; padding: 14px; min-height: 100px; }",
+))
 
 
 class MarkerSlider(QSlider):
@@ -77,6 +91,109 @@ class RouteWidget(QWidget):
     painter.setPen(QColor("#70cf4e"))
     for start, end in zip(projected, projected[1:], strict=False):
       painter.drawLine(round(start[0]), round(start[1]), round(end[0]), round(end[1]))
+
+
+class StatisticCard(QFrame):
+  def __init__(self, title: str):
+    super().__init__()
+    self.setObjectName("statisticCard")
+    self.setMinimumHeight(105)
+    layout = QVBoxLayout(self)
+    title_label = QLabel(title.upper())
+    title_label.setObjectName("statisticTitle")
+    self.value_label = QLabel("—")
+    self.value_label.setObjectName("statisticValue")
+    self.detail_label = QLabel("")
+    self.detail_label.setObjectName("statisticDetail")
+    layout.addWidget(title_label)
+    layout.addWidget(self.value_label)
+    layout.addWidget(self.detail_label)
+
+  def set_value(self, value: str, detail: str = "") -> None:
+    self.value_label.setText(value)
+    self.detail_label.setText(detail)
+
+
+class StatisticsPage(QWidget):
+  def __init__(self):
+    super().__init__()
+    layout = QVBoxLayout(self)
+    layout.setContentsMargins(28, 24, 28, 24)
+    heading = QLabel("Drive statistics")
+    heading.setObjectName("statisticsHeading")
+    self.date_label = QLabel("Open a copied drive folder to view statistics.")
+    self.date_label.setObjectName("statisticsDate")
+    layout.addWidget(heading)
+    layout.addWidget(self.date_label)
+
+    self.cards = {name: StatisticCard(title) for name, title in (
+      ("distance", "Distance"),
+      ("duration", "Duration"),
+      ("average_speed", "Average speed"),
+      ("maximum_speed", "Maximum speed"),
+      ("engagement", "Assist engaged"),
+      ("distraction", "Driver distracted"),
+      ("override", "Driver override"),
+      ("gps", "GPS coverage"),
+    )}
+    grid = QGridLayout()
+    grid.setHorizontalSpacing(14)
+    grid.setVerticalSpacing(14)
+    for index, card in enumerate(self.cards.values()):
+      grid.addWidget(card, index // 4, index % 4)
+    layout.addLayout(grid)
+
+    detail_grid = QGridLayout()
+    self.data_label = QLabel("No telemetry loaded")
+    self.data_label.setObjectName("statisticsPanel")
+    self.data_label.setAlignment(Qt.AlignmentFlag.AlignTop)
+    self.event_label = QLabel("No events loaded")
+    self.event_label.setObjectName("statisticsPanel")
+    self.event_label.setAlignment(Qt.AlignmentFlag.AlignTop)
+    detail_grid.addWidget(self.data_label, 0, 0)
+    detail_grid.addWidget(self.event_label, 0, 1)
+    detail_grid.setColumnStretch(0, 1)
+    detail_grid.setColumnStretch(1, 1)
+    layout.addLayout(detail_grid)
+    layout.addStretch()
+
+  @staticmethod
+  def _format_time(seconds: float) -> str:
+    seconds = max(0, round(seconds))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+  def set_summary(self, summary: DriveSummary, available_videos: int, total_videos: int) -> None:
+    date = (datetime.fromtimestamp(summary.start_wall_ms / 1000).astimezone().strftime("%B %d, %Y at %I:%M %p")
+            if summary.start_wall_ms else "Recording time unavailable")
+    duration = max(summary.duration_seconds, 1e-9)
+    self.date_label.setText(date)
+    self.cards["distance"].set_value(
+      f"{summary.distance_meters / 1609.344:.2f} mi", f"{summary.distance_meters / 1000:.2f} km")
+    self.cards["duration"].set_value(self._format_time(summary.duration_seconds))
+    self.cards["average_speed"].set_value(f"{summary.average_speed_mps * 2.236936:.1f} mph")
+    self.cards["maximum_speed"].set_value(f"{summary.maximum_speed_mps * 2.236936:.1f} mph")
+    self.cards["engagement"].set_value(
+      self._format_time(summary.engaged_seconds), f"{summary.engaged_seconds / duration * 100:.1f}% of drive")
+    self.cards["distraction"].set_value(
+      self._format_time(summary.distracted_seconds), f"{summary.distracted_seconds / duration * 100:.1f}% of drive")
+    self.cards["override"].set_value(
+      self._format_time(summary.driver_override_seconds), f"{summary.driver_override_seconds / duration * 100:.1f}% of drive")
+    self.cards["gps"].set_value(f"{summary.gps_fix_percent:.1f}%", "samples with a GPS fix")
+    self.data_label.setText("\n".join((
+      "DATA COVERAGE",
+      f"Telemetry samples: {summary.sample_count:,}",
+      f"Video segments: {available_videos}/{total_videos} available",
+      f"Maximum steering angle: {summary.maximum_steering_angle_deg:.1f}°",
+      f"GPS route points: {len(summary.gps_route):,}",
+    )))
+    event_lines = ["EVENTS"]
+    if summary.event_counts:
+      event_lines.extend(f"{kind.replace('_', ' ').title()}: {count}" for kind, count in sorted(summary.event_counts.items()))
+    else:
+      event_lines.append("No recorded event activations")
+    self.event_label.setText("\n".join(event_lines))
 
 
 class VideoCanvas(QFrame):
@@ -153,7 +270,11 @@ class ReplayWindow(QMainWindow):
     splitter.addWidget(video_container)
     splitter.addWidget(side)
     splitter.setStretchFactor(0, 1)
-    self.setCentralWidget(splitter)
+    self.statistics_page = StatisticsPage()
+    self.pages = QTabWidget()
+    self.pages.addTab(splitter, "Replay")
+    self.pages.addTab(self.statistics_page, "Statistics")
+    self.setCentralWidget(self.pages)
 
     file_menu = self.menuBar().addMenu("File")
     open_action = QAction("Open drive folder…", self)
@@ -196,7 +317,8 @@ class ReplayWindow(QMainWindow):
     self.timeline.setRange(0, max(0, round(drive.duration_seconds * 1000)))
     self.timeline.set_events(drive.markers(), drive.start_mono_ns, drive.duration_seconds)
     summary = drive.summary()
-    date = datetime.fromtimestamp(summary.start_wall_ms / 1000).astimezone().strftime("%b %d, %Y %I:%M %p")
+    date = (datetime.fromtimestamp(summary.start_wall_ms / 1000).astimezone().strftime("%b %d, %Y %I:%M %p")
+            if summary.start_wall_ms else "Recording time unavailable")
     self.summary_label.setText("\n".join((
       date,
       f"Duration: {self._format_time(summary.duration_seconds)}",
@@ -206,6 +328,8 @@ class ReplayWindow(QMainWindow):
       f"Distracted: {self._format_time(summary.distracted_seconds)}",
       f"Video: {sum(video.local_path is not None for video in drive.videos)}/{len(drive.videos)} segments available",
     )))
+    available_videos = sum(video.local_path is not None for video in drive.videos)
+    self.statistics_page.set_summary(summary, available_videos, len(drive.videos))
     self.route.set_points(summary.gps_route)
     self._set_position(0.0, force_video=True)
     self.setWindowTitle(f"Comma Telemetry Replay — {directory.name}")
@@ -314,8 +438,7 @@ def main() -> None:
   parser.add_argument("drive", type=Path, nargs="?", help="drive folder containing manifest.json")
   args = parser.parse_args()
   application = QApplication(sys.argv[:1])
-  application.setStyleSheet("QWidget { background: #12161a; color: #f2f4f5; } " +
-                            "QPushButton { padding: 7px 18px; background: #263039; border-radius: 5px; }")
+  application.setStyleSheet(APP_STYLESHEET)
   window = ReplayWindow(args.drive)
   window.show()
   raise SystemExit(application.exec())
