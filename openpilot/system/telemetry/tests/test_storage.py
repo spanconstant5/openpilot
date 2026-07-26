@@ -82,3 +82,19 @@ def test_video_association_is_deduplicated(tmp_path):
   assert manifest["video_segments"][0]["last_mono_ns"] == 1_200_000_000
   with sqlite3.connect(storage.database_path) as connection:
     assert connection.execute("SELECT COUNT(*) FROM video_segments").fetchone()[0] == 1
+
+
+def test_ignition_off_finalizes_and_resume_opens_a_new_segment(tmp_path):
+  storage = TelemetryStorage(tmp_path, start=START)
+  off = SegmentClock(1_200_000_000, START.wall_ms + 200)
+  storage.write_sample({"v_ego_mps": 0.0}, SegmentClock(1_100_000_000, START.wall_ms + 100))
+  storage.finalize_active_segment(off, "ignition_off")
+  manifest = load_manifest(storage.drive_directory / "manifest.json")
+  assert manifest["segments"][0]["status"] == "complete"
+  assert manifest["segments"][0]["close_reason"] == "ignition_off"
+
+  storage.resume(SegmentClock(2_000_000_000, START.wall_ms + 1_000))
+  storage.write_sample({"v_ego_mps": 1.0}, SegmentClock(2_100_000_000, START.wall_ms + 1_100))
+  storage.close(SegmentClock(2_200_000_000, START.wall_ms + 1_200))
+  manifest = load_manifest(storage.drive_directory / "manifest.json")
+  assert [segment["status"] for segment in manifest["segments"]] == ["complete", "complete"]
