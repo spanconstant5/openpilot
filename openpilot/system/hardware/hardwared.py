@@ -33,6 +33,7 @@ TEMP_TAU = 5.   # 5s time constant
 DISCONNECT_TIMEOUT = 5.  # wait 5 seconds before going offroad after disconnect so you get an alert
 PANDA_STATES_TIMEOUT = round(1000 / SERVICE_LIST['pandaStates'].frequency * 1.5)  # 1.5x the expected pandaState frequency
 ONROAD_CYCLE_TIME = 1  # seconds to wait offroad after requesting an onroad cycle
+DASHCAM_TRANSFER_WINDOW_MAX_MINUTES = 30
 
 ThermalBand = namedtuple("ThermalBand", ['min_temp', 'max_temp'])
 HardwareState = namedtuple("HardwareState", ['network_type', 'network_info', 'network_strength', 'network_stats',
@@ -177,6 +178,8 @@ def hardware_thread(end_event, hw_queue) -> None:
   in_car = False
   engaged_prev = False
   pwrsave = False
+  ignition_prev = False
+  transfer_window_until = 0.0
   offroad_cycle_count = 0
 
   params = Params()
@@ -216,6 +219,19 @@ def hardware_thread(end_event, hw_queue) -> None:
       if onroad_conditions["ignition"]:
         onroad_conditions["ignition"] = False
         cloudlog.error("panda timed out onroad")
+
+    ignition = onroad_conditions["ignition"]
+    if ignition and not ignition_prev:
+      # Do not carry an old transfer window into the next drive.
+      transfer_window_until = 0.0
+    elif not ignition and ignition_prev:
+      minutes = max(0, min(params.get_int("DashcamTransferWindowMinutes"),
+                           DASHCAM_TRANSFER_WINDOW_MAX_MINUTES))
+      if minutes:
+        transfer_window_until = time.monotonic() + minutes * 60
+        cloudlog.info("keeping Wi-Fi available for %d minute(s) after ignition off", minutes)
+    ignition_prev = ignition
+    transfer_window_active = time.monotonic() < transfer_window_until
 
     # Run at 2Hz, plus either edge of ignition
     ign_edge = (started_ts is not None) != all(onroad_conditions.values())
@@ -333,7 +349,11 @@ def hardware_thread(end_event, hw_queue) -> None:
       except Exception:
         pass
 
-    should_pwrsave = not onroad_conditions["ignition"] and msg.deviceState.screenBrightnessPercent < 1e-3
+    # Keep networking alive briefly after a drive so the local telemetry portal
+    # can pull the just-finalized recording. The display is still allowed to dim.
+    should_pwrsave = (not onroad_conditions["ignition"] and
+                      msg.deviceState.screenBrightnessPercent < 1e-3 and
+                      not transfer_window_active)
     if should_pwrsave != pwrsave or (count == 0):
       HARDWARE.set_power_save(should_pwrsave)
     pwrsave = should_pwrsave
@@ -370,7 +390,8 @@ def hardware_thread(end_event, hw_queue) -> None:
     msg.deviceState.somPowerDrawW = som_power_draw
 
     # Check if we need to shut down
-    if power_monitor.should_shutdown(onroad_conditions["ignition"], in_car, off_ts, started_seen):
+    if power_monitor.should_shutdown(onroad_conditions["ignition"], in_car, off_ts, started_seen,
+                                     hold_awake=transfer_window_active):
       cloudlog.warning(f"shutting device down, offroad since {off_ts}")
       params.put_bool("DoShutdown", True, block=True)
 

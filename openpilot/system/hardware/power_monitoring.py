@@ -103,7 +103,8 @@ class PowerMonitoring:
     return int(self.car_battery_capacity_uWh)
 
   # See if we need to shutdown
-  def should_shutdown(self, ignition: bool, in_car: bool, offroad_timestamp: float | None, started_seen: bool):
+  def should_shutdown(self, ignition: bool, in_car: bool, offroad_timestamp: float | None, started_seen: bool,
+                      hold_awake: bool = False):
     if offroad_timestamp is None:
       return False
 
@@ -112,7 +113,7 @@ class PowerMonitoring:
     offroad_time = (now - offroad_timestamp)
     low_voltage_shutdown = (self.car_voltage_mV < (VBATT_PAUSE_CHARGING * 1e3) and
                             offroad_time > VOLTAGE_SHUTDOWN_MIN_OFFROAD_TIME_S)
-    should_shutdown |= offroad_time > MAX_TIME_OFFROAD_S
+    should_shutdown |= offroad_time > MAX_TIME_OFFROAD_S and not hold_awake
     should_shutdown |= low_voltage_shutdown
     should_shutdown |= (self.car_battery_capacity_uWh <= 0)
     should_shutdown &= not ignition

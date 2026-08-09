@@ -146,6 +146,16 @@ class TestPowerMonitoring(OpenpilotTestCase):
         assert not pm.should_shutdown(ignition, True, ssb, False)
     assert not pm.should_shutdown(ignition, True, ssb, False)
 
+  def test_transfer_window_defers_shutdown(self):
+    pm = PowerMonitoring()
+    pm.car_battery_capacity_uWh = CAR_BATTERY_CAPACITY_uWh
+    assert not pm.should_shutdown(False, True, ssb - 31 * 3600, True, hold_awake=True)
+
+  def test_transfer_window_does_not_override_depleted_battery(self):
+    pm = PowerMonitoring()
+    pm.car_battery_capacity_uWh = 0
+    assert pm.should_shutdown(False, True, ssb - DELAY_SHUTDOWN_TIME_S - 1, True, hold_awake=True)
+
   # Test to check policy of not stopping charging when ignition
   def test_ignition(self, mocker):
     POWER_DRAW = 0 # To stop shutting down for other reasons

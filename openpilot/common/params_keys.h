@@ -24,6 +24,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"CarParamsCache", {CLEAR_ON_MANAGER_START, BYTES}},
     {"CarParamsPersistent", {PERSISTENT, BYTES}},
     {"CarParamsPrevRoute", {PERSISTENT, BYTES}},
+    // Minutes to keep the comma reachable over Wi-Fi after ignition turns off.
+    // Zero disables the TSK dashcam transfer window; it is capped in hardwared.
+    {"DashcamTransferWindowMinutes", {PERSISTENT, INT, "15"}},
     {"CompletedTrainingVersion", {PERSISTENT, STRING, "0"}},
     {"ControlsReady", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, BOOL}},
     {"CurrentBootlog", {PERSISTENT, STRING}},
