@@ -49,6 +49,7 @@ class DashcamHudLayer(Widget):
     self._font_medium = gui_app.font(FontWeight.MEDIUM)
     self._font_regular = gui_app.font(FontWeight.NORMAL)
     self.speed = 0.0
+    self.speed_source = "WAIT"
     self.steering_angle = 0.0
     self.steering_pressed = False
     self.throttle = ControlBarState(0.0, False, False)
@@ -72,23 +73,53 @@ class DashcamHudLayer(Widget):
     sm = ui_state.sm
     self.read_only = bool(ui_state.CP is not None and (ui_state.CP.passive or ui_state.CP.dashcamOnly))
     brand = str(ui_state.CP.brand) if ui_state.CP is not None else None
-    if not self._provider_is_explicit and brand != self._provider_brand:
-      self.provider = signal_provider_for_brand(brand)
-      self._provider_brand = brand
-    if sm.recv_frame["carState"] >= ui_state.started_frame:
-      car_state = sm["carState"]
-      v_cluster = float(car_state.vEgoCluster)
-      self._v_ego_cluster_seen = self._v_ego_cluster_seen or v_cluster != 0.0
-      v_ego = v_cluster if self._v_ego_cluster_seen else float(car_state.vEgo)
-      self.speed = max(0.0, v_ego * (CV.MS_TO_KPH if ui_state.is_metric else CV.MS_TO_MPH))
-      self.steering_angle = float(car_state.steeringAngleDeg)
+    provider_key = f"{brand}:{self.read_only}"
+    if not self._provider_is_explicit and provider_key != self._provider_brand:
+      self.provider = signal_provider_for_brand(brand, toyota_raw_fallback=self.read_only)
+      self._provider_brand = provider_key
+    self.provider.refresh()
+
+    gps = sm["gpsLocationExternal"]
+    self.gps_text = f"{gps.latitude:.5f}, {gps.longitude:.5f}" if gps.hasFix else None
+    gps_speed = max(0.0, float(gps.speed)) if gps.hasFix else None
+    car_state = sm["carState"] if sm.recv_frame["carState"] >= ui_state.started_frame else None
+    if car_state is not None:
+      speed_mps = self.provider.vehicle_speed_mps(car_state)
+      if (speed_mps is None or speed_mps < 0.1) and gps_speed is not None and gps_speed > 0.5:
+        speed_mps = gps_speed
+        self.speed_source = "GPS"
+      else:
+        raw_speed = getattr(getattr(self.provider, "raw", None), "speed_mps", None)
+        self.speed_source = "CAN" if raw_speed is not None else "CAR"
+      self.speed = max(0.0, (speed_mps or 0.0) * (CV.MS_TO_KPH if ui_state.is_metric else CV.MS_TO_MPH))
+      steering_angle = self.provider.steering_angle_deg(car_state)
+      self.steering_angle = float(steering_angle or 0.0)
       self.steering_pressed = bool(car_state.steeringPressed)
-      self.driver_override = bool(car_state.steeringPressed or car_state.gasPressed or car_state.brakePressed)
       self.throttle, self.brake = self.provider.throttle_brake_states(car_state)
+      self.driver_override = bool(car_state.steeringPressed or self.throttle.driver_override or self.brake.driver_override)
       self.rpm = self.provider.engine_rpm(car_state)
       self.hybrid = self.provider.hybrid_state(car_state)
       stock_state = self.provider.stock_assistance_state(car_state)
     else:
+      speed_mps = self.provider.vehicle_speed_mps(None)
+      if speed_mps is not None:
+        self.speed_source = "CAN"
+      elif gps_speed is not None:
+        speed_mps = gps_speed
+        self.speed_source = "GPS"
+      else:
+        self.speed_source = "WAIT"
+      self.speed = max(0.0, (speed_mps or 0.0) * (CV.MS_TO_KPH if ui_state.is_metric else CV.MS_TO_MPH))
+      steering_angle = self.provider.steering_angle_deg(None)
+      self.steering_angle = float(steering_angle or 0.0)
+      self.steering_pressed = False
+      self.throttle, self.brake = self.provider.throttle_brake_states(None)
+      self.driver_override = self.throttle.driver_override or self.brake.driver_override
+      self.rpm = self.provider.engine_rpm(None)
+      self.hybrid = self.provider.hybrid_state(None)
+      stock_state = self.provider.stock_assistance_state(None)
+
+    if not stock_state:
       stock_state = None
 
     if stock_state:
@@ -115,9 +146,6 @@ class DashcamHudLayer(Widget):
         self.driver_status, self.driver_color = "ATTENTIVE", GREEN
       else:
         self.driver_status, self.driver_color = "FACE NOT FOUND", MUTED
-
-    gps = sm["gpsLocationExternal"]
-    self.gps_text = f"{gps.latitude:.5f}, {gps.longitude:.5f}" if gps.hasFix else None
 
     current_second = int(time.monotonic())
     if current_second != self._clock_second:
@@ -148,6 +176,10 @@ class DashcamHudLayer(Widget):
     _centered_text(self._font_bold, str(round(self.speed)), center_x, top, speed_size, WHITE)
     unit = "km/h" if ui_state.is_metric else "mph"
     _centered_text(self._font_medium, unit, center_x, top + speed_size - 3, unit_size, MUTED)
+    source_size = 7 if self.compact else 14
+    _centered_text(self._font_bold, f"SPEED {self.speed_source}", center_x,
+                   top + speed_size + unit_size - (5 if self.compact else 2), source_size,
+                   GREEN if self.speed_source in ("CAR", "CAN") else MUTED)
 
   def _draw_throttle_brake(self, x: float, y: float, width: float, row_height: float, segments: int) -> None:
     label_width = 92 if not self.compact else 30

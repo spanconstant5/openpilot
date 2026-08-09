@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — live telemetry owner-test build
+
+Status: installable from branch `tskdash-live-telemetry-test`; not tagged and not published as a
+GitHub release.
+
+- Adds a read-only Toyota SecOC CAN fallback for unsupported Toyota Security Key vehicles
+- Supplies wheel speed, steering angle, throttle, brake state, RPM, radar-cruise state, and LTA
+  state to the comma HUD when normal `carState` telemetry is unavailable
+- Falls back to GPS speed when neither recognized-car speed nor fresh Toyota wheel speed is usable
+- Labels the comma speed source as `CAR`, `CAN`, or `GPS` for road-test diagnostics
+- Records the same fallback values into the segmented SQLite telemetry used by the desktop app
+- Leaves all CAN transmission, panda safety, and vehicle-control behavior unchanged
+
 ## Unreleased — Phase 3 Toyota hybrid owner-test build
 
 Status: prepared on `codex/phase3-toyota-hybrid` and intended for upload without a tag, release, or

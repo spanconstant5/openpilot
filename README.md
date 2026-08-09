@@ -44,6 +44,21 @@ The comma setup screen automatically expands that short entry to
 **[installer.comma.ai/spanconstant5/tskdash](https://installer.comma.ai/spanconstant5/tskdash)**
 and installs the `tskdash` branch from `spanconstant5/openpilot`. This is an alpha test branch.
 
+### Live telemetry owner-test branch
+
+To test the read-only Toyota Security Key telemetry fallback without changing the main alpha
+branch or release, enter:
+
+```text
+spanconstant5/tskdash-live-telemetry-test
+```
+
+Full installer URL:
+**[installer.comma.ai/spanconstant5/tskdash-live-telemetry-test](https://installer.comma.ai/spanconstant5/tskdash-live-telemetry-test)**.
+This unpublished owner-test build shows `SPEED CAR`, `SPEED CAN`, or `SPEED GPS` under the speed
+readout so a road test can identify the live source. It never transmits CAN messages and does not
+change panda safety or vehicle-control behavior.
+
 The HUD keeps speed bottom-center, **Throttle** and **Brake** bars bottom-left, a steering-angle
 scale bottom-right, driver status at left, assistance status at upper-right, and only a compact
 numeric RPM value. The comma 4 uses a purpose-built compact layout. Toyota vehicles display

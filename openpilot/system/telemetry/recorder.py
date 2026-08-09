@@ -51,10 +51,12 @@ class TelemetryRecorder:
     self.params = Params()
     metadata: dict[str, Any] = {"sample_rate_hz": SAMPLE_RATE_HZ}
     self.toyota_decoder: ToyotaExtrasDecoder | None = None
+    self.raw_toyota_fallback = False
     self.toyota_extras = ToyotaExtras()
     self.can_sock = None
     self.vehicle_mass_kg: float | None = None
     car_params = self.params.get("CarParamsPersistent")
+    CP = None
     if car_params is not None:
       try:
         CP = messaging.log_from_bytes(car_params, car.CarParams)
@@ -69,6 +71,17 @@ class TelemetryRecorder:
           self.can_sock = messaging.sub_sock("can", conflate=False, timeout=0)
       except Exception:
         cloudlog.exception("telemetryd could not initialize vehicle telemetry")
+    if self.toyota_decoder is None and (CP is None or CP.passive or CP.dashcamOnly):
+      try:
+        # Late-model Toyota Security Key cars can remain dashcam-only and have
+        # no recognized fingerprint. Their read-only powertrain signals still
+        # use the reviewed SecOC DBC, so keep recording useful telemetry.
+        self.toyota_decoder = ToyotaExtrasDecoder(dbc_name="toyota_secoc_pt_generated")
+        self.can_sock = messaging.sub_sock("can", conflate=False, timeout=0)
+        self.raw_toyota_fallback = True
+        metadata["vehicle_signal_source"] = "toyota_secoc_read_only_fallback"
+      except Exception:
+        cloudlog.exception("telemetryd could not initialize Toyota read-only fallback")
     start = SegmentClock(time.monotonic_ns(), time.time_ns() // 1_000_000)
     self.storage = TelemetryStorage(telemetry_root(), start=start, metadata=metadata)
     self.running = True
@@ -136,57 +149,86 @@ class TelemetryRecorder:
 
   def _extract_sample(self, clock: SegmentClock) -> dict[str, Any]:
     sample: dict[str, Any] = {}
-    if self.sm.valid["carState"]:
-      car_state = self.sm["carState"]
-      legacy = car_state.deprecated
-      gas = float(legacy.gas)
-      brake = float(legacy.brake)
-      legacy_engine_rpm = float(legacy.engineRpm)
-      engine_rpm = self.toyota_extras.engine_rpm
-      if engine_rpm is None and legacy_engine_rpm > 0:
-        engine_rpm = legacy_engine_rpm
-      engine_running = self.toyota_extras.engine_running
-      ev_mode = derive_ev_mode(engine_rpm, engine_running)
-      drive_force = self.toyota_extras.hybrid_drive_force_n
-      power_flow_kw: float | None = None
-      power_flow_source: str | None = None
-      if drive_force is not None:
-        power_flow_kw = drive_force * float(car_state.vEgo) / 1000.0
-        power_flow_source = "dbc_wheel_force"
-      elif self.vehicle_mass_kg is not None and abs(float(car_state.vEgo)) > 0.5:
-        power_flow_kw = self.vehicle_mass_kg * float(car_state.aEgo) * float(car_state.vEgo) / 1000.0
-        power_flow_source = "estimated_traction"
-      lta_active = self.toyota_extras.lta_active
-      assist_status = tss_status(
-        bool(car_state.cruiseState.available), bool(car_state.cruiseState.enabled), lta_active,
-        bool(car_state.stockAeb),
-      )
-      sample.update({
-        "v_ego_mps": float(car_state.vEgo),
-        "a_ego_mps2": float(car_state.aEgo),
-        "steering_angle_deg": float(car_state.steeringAngleDeg),
-        "steering_torque": float(car_state.steeringTorque),
-        "steering_pressed": bool(car_state.steeringPressed),
-        "gas": gas if gas > 0 else None,
-        "gas_pressed": bool(car_state.gasPressed),
-        "brake": brake if brake > 0 else None,
-        "brake_pressed": bool(car_state.brakePressed),
-        "engine_rpm": engine_rpm,
-        "engine_running": engine_running,
-        "hybrid_battery_percent": None,
-        "ev_mode": ev_mode,
-        "power_flow_kw": power_flow_kw,
-        "power_flow_source": power_flow_source,
-        "hybrid_drive_force_n": drive_force,
-        "stock_aeb": bool(car_state.stockAeb),
-        "cruise_available": bool(car_state.cruiseState.available),
-        "cruise_enabled": bool(car_state.cruiseState.enabled),
-        "lta_active": lta_active,
-        "tss_status": assist_status,
-      })
-      self._record_change(clock, "brake_override", bool(car_state.brakePressed))
-      self._record_change(clock, "steering_override", bool(car_state.steeringPressed))
-      self._record_change(clock, "tss_status", assist_status)
+    car_state = self.sm["carState"] if self.sm.valid["carState"] else None
+    legacy = car_state.deprecated if car_state is not None else None
+    car_speed = float(car_state.vEgo) if car_state is not None else None
+    speed_mps = car_speed
+    speed_source = "carState" if car_state is not None else None
+    if self.toyota_extras.speed_mps is not None and (self.raw_toyota_fallback or speed_mps is None or speed_mps < 0.1):
+      speed_mps = self.toyota_extras.speed_mps
+      speed_source = "toyota_can"
+    gps_speed = float(self.gps.get("gps_speed_mps", 0.0)) if self.gps.get("gps_has_fix") else None
+    if (speed_mps is None or speed_mps < 0.1) and gps_speed is not None and gps_speed > 0.5:
+      speed_mps = gps_speed
+      speed_source = "gps"
+
+    car_angle = float(car_state.steeringAngleDeg) if car_state is not None else None
+    steering_angle = self.toyota_extras.steering_angle_deg if self.raw_toyota_fallback else car_angle
+    if steering_angle is None:
+      steering_angle = car_angle
+    gas = float(legacy.gas) if legacy is not None else None
+    gas_pressed = bool(car_state.gasPressed) if car_state is not None else False
+    if self.toyota_extras.throttle is not None and (self.raw_toyota_fallback or not gas):
+      gas = self.toyota_extras.throttle
+      gas_pressed = gas > 0.001
+    brake = float(legacy.brake) if legacy is not None else None
+    brake_pressed = bool(car_state.brakePressed) if car_state is not None else False
+    if self.toyota_extras.brake_pressed is not None and (self.raw_toyota_fallback or not brake_pressed):
+      brake_pressed = self.toyota_extras.brake_pressed
+      brake = max(brake or 0.0, float(brake_pressed))
+
+    legacy_engine_rpm = float(legacy.engineRpm) if legacy is not None else 0.0
+    engine_rpm = self.toyota_extras.engine_rpm
+    if engine_rpm is None and legacy_engine_rpm > 0:
+      engine_rpm = legacy_engine_rpm
+    engine_running = self.toyota_extras.engine_running
+    ev_mode = derive_ev_mode(engine_rpm, engine_running)
+    drive_force = self.toyota_extras.hybrid_drive_force_n
+    acceleration = float(car_state.aEgo) if car_state is not None else 0.0
+    power_flow_kw: float | None = None
+    power_flow_source: str | None = None
+    if drive_force is not None and speed_mps is not None:
+      power_flow_kw = drive_force * speed_mps / 1000.0
+      power_flow_source = "dbc_wheel_force"
+    elif self.vehicle_mass_kg is not None and speed_mps is not None and abs(speed_mps) > 0.5:
+      power_flow_kw = self.vehicle_mass_kg * acceleration * speed_mps / 1000.0
+      power_flow_source = "estimated_traction"
+
+    stock_aeb = bool(car_state.stockAeb) if car_state is not None else False
+    cruise_available = bool(car_state.cruiseState.available) if car_state is not None else False
+    cruise_enabled = bool(car_state.cruiseState.enabled) if car_state is not None else False
+    if self.toyota_extras.radar_cruise_active is not None and self.raw_toyota_fallback:
+      cruise_enabled = self.toyota_extras.radar_cruise_active
+      cruise_available = True
+    lta_active = self.toyota_extras.lta_active
+    assist_status = tss_status(cruise_available, cruise_enabled, lta_active, stock_aeb)
+    sample.update({
+      "v_ego_mps": speed_mps,
+      "speed_source": speed_source,
+      "a_ego_mps2": acceleration,
+      "steering_angle_deg": steering_angle,
+      "steering_torque": float(car_state.steeringTorque) if car_state is not None else None,
+      "steering_pressed": bool(car_state.steeringPressed) if car_state is not None else False,
+      "gas": gas if gas and gas > 0 else None,
+      "gas_pressed": gas_pressed,
+      "brake": brake if brake and brake > 0 else None,
+      "brake_pressed": brake_pressed,
+      "engine_rpm": engine_rpm,
+      "engine_running": engine_running,
+      "hybrid_battery_percent": None,
+      "ev_mode": ev_mode,
+      "power_flow_kw": power_flow_kw,
+      "power_flow_source": power_flow_source,
+      "hybrid_drive_force_n": drive_force,
+      "stock_aeb": stock_aeb,
+      "cruise_available": cruise_available,
+      "cruise_enabled": cruise_enabled,
+      "lta_active": lta_active,
+      "tss_status": assist_status,
+    })
+    self._record_change(clock, "brake_override", brake_pressed)
+    self._record_change(clock, "steering_override", bool(car_state.steeringPressed) if car_state is not None else False)
+    self._record_change(clock, "tss_status", assist_status)
 
     if self.sm.valid["selfdriveState"]:
       selfdrive = self.sm["selfdriveState"]
