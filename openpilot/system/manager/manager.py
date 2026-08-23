@@ -20,6 +20,7 @@ from openpilot.system.athena.registration import register, UNREGISTERED_DONGLE_I
 from openpilot.common.swaglog import cloudlog, add_file_handler
 from openpilot.common.version import get_build_metadata
 from openpilot.common.hardware.hw import Paths
+from openpilot.tools.eps_telescope.safety import vehicle_is_safe_for_probe
 
 
 def manager_init() -> None:
@@ -113,7 +114,7 @@ def manager_thread() -> None:
     ignore.append("pandad")
   ignore += [x for x in os.getenv("BLOCK", "").split(",") if len(x) > 0]
 
-  sm = messaging.SubMaster(['deviceState', 'carParams', 'pandaStates'], poll='deviceState')
+  sm = messaging.SubMaster(['deviceState', 'carParams', 'pandaStates', 'carState', 'selfdriveState'], poll='deviceState')
   pm = messaging.PubMaster(['managerState'])
 
   params.put_bool("IsOffroad", True, block=True)
@@ -121,11 +122,40 @@ def manager_thread() -> None:
 
   started_prev = False
   ignition_prev = False
+  eps_telescope_active = False
 
   while True:
     sm.update(1000)
 
     started = sm['deviceState'].started
+
+    eps_telescope_requested = params.get_bool("EpsTelescopeRequested")
+    if eps_telescope_requested and not eps_telescope_active:
+      safe, reason = vehicle_is_safe_for_probe(
+        started,
+        sm['carState'],
+        sm['selfdriveState'],
+        data_valid=sm.all_checks(['carState', 'selfdriveState']),
+      )
+      if safe:
+        eps_telescope_active = True
+        cloudlog.warning("EPS Telescope requested; pausing onroad services and pandad")
+      else:
+        params.put("EpsTelescopeStatus", {
+          "state": "blocked",
+          "message": reason,
+          "progress": 0.0,
+        }, block=True)
+        params.put_bool("EpsTelescopeRequested", False, block=True)
+        eps_telescope_requested = False
+    elif not eps_telescope_requested and eps_telescope_active:
+      # Keep pandad stopped until the worker has actually released the Panda.
+      # ensure_running sends the worker SIGINT below; restoration happens on a
+      # later manager tick after the process exits.
+      eps_process = managed_processes["eps_telescope"].proc
+      if eps_process is None or not eps_process.is_alive():
+        eps_telescope_active = False
+        cloudlog.warning("EPS Telescope finished; restoring normal services")
 
     if started and not started_prev:
       params.clear_all(ParamKeyFlag.CLEAR_ON_ONROAD_TRANSITION)
@@ -143,7 +173,9 @@ def manager_thread() -> None:
     started_prev = started
     ignition_prev = ignition
 
-    ensure_running(managed_processes.values(), started, params=params, CP=sm['carParams'], not_run=ignore)
+    effective_started = started and not eps_telescope_active
+    dynamic_ignore = ignore + (["pandad"] if eps_telescope_active else [])
+    ensure_running(managed_processes.values(), effective_started, params=params, CP=sm['carParams'], not_run=dynamic_ignore)
 
     running = ' '.join("{}{}\u001b[0m".format("\u001b[32m" if p.proc.is_alive() else "\u001b[31m", p.name)
                        for p in managed_processes.values() if p.proc)
