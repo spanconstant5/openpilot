@@ -1,0 +1,12 @@
+{
+  "profile_id": "camry-2025-2026-stock",
+  "vehicle": "Toyota Camry",
+  "model_years": "2025-2026",
+  "harness_variant": "stock",
+  "status": "research_pending_vehicle_log",
+  "passive_only": true,
+  "read_only_dbc": null,
+  "read_only_bus": null,
+  "pin_map_status": "factory_unverified_vehicle_connector",
+  "notes": "Current upstream documentation marks 2025+ Camry as blocked by Toyota CAN message authentication."
+}
