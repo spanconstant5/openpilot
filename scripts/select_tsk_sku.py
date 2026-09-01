@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from openpilot.common.tsk_sku import TskSkuProfile  # noqa: E402
+from openpilot.common.tsk_sku import TskSkuProfile
 
 
 PROFILE_DIR = ROOT / "sku" / "profiles"
