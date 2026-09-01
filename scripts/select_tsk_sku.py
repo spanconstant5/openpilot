@@ -4,12 +4,15 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import sys
 from pathlib import Path
 
-from openpilot.common.tsk_sku import TskSkuProfile
-
-
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from openpilot.common.tsk_sku import TskSkuProfile  # noqa: E402
+
+
 PROFILE_DIR = ROOT / "sku" / "profiles"
 ACTIVE_PATH = ROOT / "sku" / "active.json"
 ACTIVE_README_PATH = ROOT / "sku" / "ACTIVE_PROFILE.md"
