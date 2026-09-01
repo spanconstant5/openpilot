@@ -1,0 +1,12 @@
+{
+  "profile_id": "rav4-2026-pinswap",
+  "vehicle": "Toyota RAV4",
+  "model_years": "2026",
+  "harness_variant": "pinswap",
+  "status": "blocked_pending_vehicle_connector_pin_table_and_capture",
+  "passive_only": true,
+  "read_only_dbc": null,
+  "read_only_bus": null,
+  "pin_map_status": "unverified",
+  "notes": "Do not assume the supplied pin-swap applies to the new 2026 RAV4 platform."
+}

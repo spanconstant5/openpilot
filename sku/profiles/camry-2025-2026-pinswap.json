@@ -1,0 +1,12 @@
+{
+  "profile_id": "camry-2025-2026-pinswap",
+  "vehicle": "Toyota Camry",
+  "model_years": "2025-2026",
+  "harness_variant": "pinswap",
+  "status": "blocked_pending_vehicle_connector_pin_table_and_capture",
+  "passive_only": true,
+  "read_only_dbc": null,
+  "read_only_bus": null,
+  "pin_map_status": "unverified",
+  "notes": "Do not assume the Corolla/Toyota B pin-swap applies to the Camry without connector and continuity evidence."
+}

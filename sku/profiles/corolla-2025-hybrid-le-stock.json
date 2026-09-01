@@ -1,0 +1,12 @@
+{
+  "profile_id": "corolla-2025-hybrid-le-stock",
+  "vehicle": "Toyota Corolla Hybrid LE",
+  "model_years": "2025",
+  "harness_variant": "stock",
+  "status": "log_verified_read_only",
+  "passive_only": true,
+  "read_only_dbc": "toyota_secoc_pt_generated",
+  "read_only_bus": 1,
+  "pin_map_status": "factory",
+  "notes": "DBC and bus were verified against the supplied Corolla rlog. This is not active-control support."
+}

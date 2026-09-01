@@ -1,0 +1,12 @@
+{
+  "profile_id": "corolla-2025-hybrid-le-pinswap",
+  "vehicle": "Toyota Corolla Hybrid LE",
+  "model_years": "2025",
+  "harness_variant": "pinswap",
+  "status": "blocked_pending_pin_table_and_capture",
+  "passive_only": true,
+  "read_only_dbc": null,
+  "read_only_bus": null,
+  "pin_map_status": "unverified",
+  "notes": "User photos and a marked Toyota B crop were supplied, but no unambiguous cavity mapping is available."
+}

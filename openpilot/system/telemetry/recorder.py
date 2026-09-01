@@ -11,6 +11,7 @@ from opendbc.car.structs import car
 from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper
 from openpilot.common.swaglog import cloudlog
+from openpilot.common.tsk_sku import load_tsk_sku
 from openpilot.selfdrive.pandad import can_capnp_to_list
 from openpilot.system.hardware import PC
 
@@ -50,6 +51,17 @@ class TelemetryRecorder:
     self.sm = messaging.SubMaster(list(SERVICES))
     self.params = Params()
     metadata: dict[str, Any] = {"sample_rate_hz": SAMPLE_RATE_HZ}
+    sku_profile = load_tsk_sku()
+    if sku_profile is not None:
+      metadata.update({
+        "tsk_sku_profile": sku_profile.profile_id,
+        "tsk_sku_vehicle": sku_profile.vehicle,
+        "tsk_sku_model_years": sku_profile.model_years,
+        "tsk_sku_harness_variant": sku_profile.harness_variant,
+        "tsk_sku_status": sku_profile.status,
+        "tsk_sku_passive_only": sku_profile.passive_only,
+        "tsk_sku_pin_map_status": sku_profile.pin_map_status,
+      })
     self.toyota_decoder: ToyotaExtrasDecoder | None = None
     self.raw_toyota_fallback = False
     self.toyota_extras = ToyotaExtras()
@@ -76,10 +88,13 @@ class TelemetryRecorder:
         # Late-model Toyota Security Key cars can remain dashcam-only and have
         # no recognized fingerprint. Their read-only powertrain signals still
         # use the reviewed SecOC DBC, so keep recording useful telemetry.
-        self.toyota_decoder = ToyotaExtrasDecoder(dbc_name="toyota_secoc_pt_generated")
-        self.can_sock = messaging.sub_sock("can", conflate=False, timeout=0)
-        self.raw_toyota_fallback = True
-        metadata["vehicle_signal_source"] = "toyota_secoc_read_only_fallback"
+        fallback_dbc = sku_profile.read_only_dbc if sku_profile is not None else "toyota_secoc_pt_generated"
+        fallback_bus = sku_profile.read_only_bus if sku_profile is not None else 0
+        if fallback_dbc is not None:
+          self.toyota_decoder = ToyotaExtrasDecoder(dbc_name=fallback_dbc, bus=fallback_bus or 0)
+          self.can_sock = messaging.sub_sock("can", conflate=False, timeout=0)
+          self.raw_toyota_fallback = True
+          metadata["vehicle_signal_source"] = "toyota_secoc_read_only_fallback"
       except Exception:
         cloudlog.exception("telemetryd could not initialize Toyota read-only fallback")
     start = SegmentClock(time.monotonic_ns(), time.time_ns() // 1_000_000)

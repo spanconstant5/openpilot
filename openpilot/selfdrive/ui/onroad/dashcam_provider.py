@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from openpilot.system.telemetry.toyota_decoder import ToyotaExtras
+from openpilot.common.tsk_sku import load_tsk_sku
 
 
 @dataclass(frozen=True)
@@ -107,8 +108,12 @@ class ToyotaSignalProvider(GenericSignalProvider):
         from cereal import messaging
         from openpilot.system.telemetry.toyota_decoder import ToyotaExtrasDecoder
 
-        self._raw_decoder = ToyotaExtrasDecoder(dbc_name="toyota_secoc_pt_generated")
-        self._can_sock = messaging.sub_sock("can", conflate=False, timeout=0)
+        sku_profile = load_tsk_sku()
+        dbc_name = sku_profile.read_only_dbc if sku_profile is not None else "toyota_secoc_pt_generated"
+        bus = sku_profile.read_only_bus if sku_profile is not None else 0
+        if dbc_name is not None:
+          self._raw_decoder = ToyotaExtrasDecoder(dbc_name=dbc_name, bus=bus or 0)
+          self._can_sock = messaging.sub_sock("can", conflate=False, timeout=0)
       except Exception:
         self._raw_decoder = None
         self._can_sock = None

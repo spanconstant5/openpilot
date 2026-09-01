@@ -1,0 +1,12 @@
+{
+  "profile_id": "rav4-2026-stock",
+  "vehicle": "Toyota RAV4",
+  "model_years": "2026",
+  "harness_variant": "stock",
+  "status": "research_pending_upstream_platform_and_vehicle_log",
+  "passive_only": true,
+  "read_only_dbc": null,
+  "read_only_bus": null,
+  "pin_map_status": "factory_unverified_vehicle_connector",
+  "notes": "Current upstream support data ends at 2025. No 2026 RAV4 platform assumption is made."
+}

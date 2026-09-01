@@ -45,7 +45,7 @@ def tss_status(cruise_available: bool, radar_cruise_active: bool, lta_active: bo
 class ToyotaExtrasDecoder:
   """Read-only decoder for signals already defined in the selected Toyota DBC."""
 
-  def __init__(self, car_params=None, dbc_name: str | None = None):
+  def __init__(self, car_params=None, dbc_name: str | None = None, bus: int = 0):
     from opendbc.can import CANParser
     from opendbc.can.dbc import DBC as DBCFile
     from opendbc.car import Bus
@@ -63,7 +63,7 @@ class ToyotaExtrasDecoder:
     messages = [(name, math.nan) for name in desired_messages if name in dbc.name_to_msg]
     if not messages:
       raise RuntimeError(f"Toyota DBC {dbc_name} has no Phase 3 telemetry messages")
-    self.parser = CANParser(dbc_name, messages, 0)
+    self.parser = CANParser(dbc_name, messages, bus)
 
   def _fresh_value(self, message: str, signal: str, now_ns: int) -> float | None:
     if message not in self.parser.vl or signal not in self.parser.vl[message]:
