@@ -221,5 +221,7 @@ class ArchiveWriter:
     if self.stream is not None:
       try:
         self.stream.close()
+      except OSError:
+        pass
       finally:
         self.stream = None
