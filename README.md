@@ -1,5 +1,20 @@
 # comma dashcam telemetry
 
+## TSS3 automatic passive button-recorder branch
+
+This `tss3-passive-recorder` branch adds an automatic **receive-only** recorder for Toyota TSS3
+cruise-button research. It starts with each on-road session, watches physical CAN IDs `0x24D` and
+`0x1D3`, and stores a bounded local archive for later SSH retrieval. It has no CAN publisher, makes
+no panda safety change, and never starts the separate transmission experiment.
+
+On the comma Custom Software screen, install this branch with:
+
+```text
+spanconstant5/tss3-passive-recorder
+```
+
+See [Automatic TSS3 cruise-button recorder](docs/TSS3_CRUISE_RECORDER.md) before installing.
+
 > **First alpha build:** `v0.1.0-alpha.1` is the first public testing build of this project.
 > It has not been validated on comma hardware or in a vehicle. Expect incomplete fields and UI
 > issues; test cautiously, remain ready to take over, and report results before relying on it.
@@ -13,7 +28,7 @@ This project is specifically for Toyota Security Key (TSK) owners who want usefu
 telemetry features while the broader TSK support path is still being solved. It is not itself a
 TSK bypass, key extractor, or replacement for reviewed openpilot/opendbc TSK support.
 
-On the **Custom Software** screen of a comma 3/3X or comma 4, type exactly:
+For the base dashcam branch without the automatic TSS3 button recorder, type:
 
 ```text
 spanconstant5/tskdash

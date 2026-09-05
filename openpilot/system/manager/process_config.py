@@ -75,6 +75,7 @@ procs = [
 
   NativeProcess("loggerd", "openpilot/system/loggerd", ["./loggerd"], logging),
   PythonProcess("telemetryd", "openpilot.system.telemetry.recorder", logging),
+  PythonProcess("tss3cruiseprobed", "openpilot.system.tss3_cruise_recorder.daemon", only_onroad, restart_if_crash=True),
   NativeProcess("encoderd", "openpilot/system/loggerd", ["./encoderd"], only_onroad),
   NativeProcess("stream_encoderd", "openpilot/system/loggerd", ["./encoderd", "--stream"], or_(and_(livestream, not_(iscar)), notcar)),
   PythonProcess("logmessaged", "openpilot.system.logmessaged", always_run),
