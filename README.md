@@ -7,6 +7,10 @@ cruise-button research. It starts with each on-road session, watches physical CA
 `0x1D3`, and stores a bounded local archive for later SSH retrieval. It has no CAN publisher, makes
 no panda safety change, and never starts the separate transmission experiment.
 
+The target vehicle owner reports that the Toyota pin-swap is already installed. The recorder does
+not depend on a hard-coded bus number: it observes every physical panda source bus and preserves the
+bus with each record. It does not inspect, validate, or change the pin-swap wiring.
+
 On the comma Custom Software screen, install this branch with:
 
 ```text

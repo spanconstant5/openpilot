@@ -18,6 +18,18 @@ This is evidence collection, not a claim that a later transmit experiment will w
 The DBC bit positions are source-backed, but their physical behavior and bus placement still need
 validation on this specific Toyota.
 
+## Pin-swap hardware context
+
+The target vehicle owner reports that the Toyota pin-swap is already installed. That is important
+provenance for these captures, but it is not something software can verify. The recorder does not
+assume a fixed bus number: it watches every physical panda source bus (`src < 0x80`) and stores the
+observed bus with every retained frame.
+
+Document the pin-swap version, orientation, and any harness labels alongside the logs. If a capture
+contains no target frames, treat that as an inconclusive wiring/routing result—not proof that the
+vehicle never sends the messages. Verify harness seating and the intended pin map with vehicle
+power removed; do not insert, remove, or repin a powered harness.
+
 ## Safety boundary
 
 The automatic component is receive-only:
@@ -112,12 +124,14 @@ the recorder intentionally excludes location, video, VIN, and camera/driver-moni
 
 ## First parked test
 
-1. Install the branch and reboot.
-2. Turn the vehicle on while safely parked and wait for the normal on-road UI.
-3. Press and release one stock cruise button at a time, noting the order and approximate time.
-4. Turn the vehicle off and wait for the comma to return off-road.
-5. SSH in and run `status`, `list`, and `summary` above.
-6. Confirm that the reported names/order match the physical buttons. Preserve the raw logs even if
+1. With vehicle power removed, confirm the existing pin-swap harness is seated and record its
+   version/orientation without changing the wiring.
+2. Install the branch and reboot.
+3. Turn the vehicle on while safely parked and wait for the normal on-road UI.
+4. Press and release one stock cruise button at a time, noting the order and approximate time.
+5. Turn the vehicle off and wait for the comma to return off-road.
+6. SSH in and run `status`, `list`, and `summary` above.
+7. Confirm that the reported bus, names, and order match the physical test. Preserve the raw logs even if
    a label is wrong; discovering model-specific differences is the purpose of the probe.
 
 Do not perform an active CAN test as part of this checklist. Transmit testing remains separate,
