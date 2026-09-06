@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""SSH-friendly status and log inspection commands."""
+"""SSH-friendly, read-only access to openpilot's existing loggerd rlogs."""
 
 from __future__ import annotations
 
 import argparse
-import gzip
 import json
-import time
-from collections import Counter
+import os
 from pathlib import Path
 
-from .storage import archive_size, default_log_root, default_status_path
+from .rlogs import RlogSegment, discover_rlogs, latest_routes, scan_can_messages
+
+
+DEFAULT_LOG_ROOT = "/data/media/0/realdata"
 
 
 def _human_bytes(value: int) -> str:
@@ -22,125 +23,128 @@ def _human_bytes(value: int) -> str:
   return f"{amount:.1f} GiB"
 
 
-def _log_files(root: Path, include_active: bool = False) -> list[Path]:
-  patterns = ("*.jsonl", "*.jsonl.gz", "*.active") if include_active else ("*.jsonl", "*.jsonl.gz")
-  return sorted(
-    (path for pattern in patterns for path in root.glob(pattern) if path.is_file() and not path.is_symlink()),
-    key=lambda path: (path.stat().st_mtime_ns, path.name),
-  )
+def _root(args: argparse.Namespace) -> Path:
+  return Path(args.root).expanduser()
 
 
-def command_status(_args: argparse.Namespace) -> int:
-  path = default_status_path()
-  if not path.is_file():
-    print("No recorder status exists yet. Complete an on-road startup first.")
-    return 1
-  try:
-    value = json.loads(path.read_text(encoding="utf-8"))
-  except (OSError, json.JSONDecodeError) as error:
-    print(f"Recorder status is unreadable: {error}")
+def _selected(args: argparse.Namespace) -> list[tuple[str, list[RlogSegment]]]:
+  return latest_routes(discover_rlogs(_root(args)), args.latest)
+
+
+def command_status(args: argparse.Namespace) -> int:
+  root = _root(args)
+  routes = _selected(args)
+  print("Capture source: openpilot loggerd rlog (no extra recorder process)")
+  print(f"Log root: {root}")
+  if not routes:
+    print("No completed or in-progress rlog segments found.")
     return 1
 
-  updated_ns = value.get("updated_wall_time_ns")
-  age_seconds = None
-  if isinstance(updated_ns, int):
-    age_seconds = max(0.0, (time.time_ns() - updated_ns) / 1_000_000_000)
-  print(f"State: {value.get('state', 'unknown')} ({value.get('mode', 'unknown')})")
-  print(f"Status age: {age_seconds:.1f} seconds" if age_seconds is not None else "Status age: unknown")
-  print(f"Buses seen: {value.get('discovered_buses', [])}")
-  if value.get("capture_version") == "discovery-v2":
-    print("Capture: discovery-v2 (all physical CAN received, no button decoding)")
-    print(f"Physical frames: {value.get('physical_frames', 0)}; invalid source batches: {value.get('invalid_batches', 0)}")
-    print(f"Distinct bus/address/length combinations: {len(value.get('inventory', []))}")
-    last_receive = value.get("last_receive_mono_ns")
-    if isinstance(last_receive, int) and value.get("state") == "running":
-      print(f"Last CAN batch received: {max(0, time.monotonic_ns() - last_receive) / 1e9:.1f} seconds ago")
-    for item in value.get("inventory", []):
-      if item["address_hex"] in ("0x24D", "0x1D3"):
-        print(f"  {item['address_hex']} bus {item['bus']}, {item['length']} bytes: {item['frames']} frames")
-  else:
-    print(f"Button press/release edges: {value.get('press_edges', 0)}/{value.get('release_edges', 0)}")
-    print(f"Buttons: {value.get('button_presses', {})}")
-  print(f"Archive: {_human_bytes(int(value.get('archive_bytes', 0)))} at {value.get('log_root', default_log_root())}")
-  print(f"Active file: {value.get('active_file') or 'none'}")
-  print(f"Last error: {value.get('last_error') or 'none'}")
+  route, segments = routes[0]
+  print(f"Latest route: {route}")
+  print(f"Segments found: {len(segments)} ({_human_bytes(sum(item.size for item in segments))})")
+  print("Run this after the drive is over: python -m openpilot.system.tss3_cruise_recorder.control list")
   return 0
 
 
 def command_list(args: argparse.Namespace) -> int:
-  root = default_log_root()
-  files = _log_files(root, args.include_active) if root.exists() else []
-  if not files:
-    print(f"No {'active or completed' if args.include_active else 'completed'} logs in {root}")
-    return 0
-  for path in files:
-    print(f"{_human_bytes(path.stat().st_size):>10}  {path}")
-  print(f"Total archive: {_human_bytes(archive_size(root))}")
+  routes = _selected(args)
+  if not routes:
+    print(f"No rlog segments found in {_root(args)}")
+    return 1
+
+  for route, segments in routes:
+    if not args.paths_only:
+      print(f"Route {route}: {len(segments)} segment(s), {_human_bytes(sum(item.size for item in segments))}")
+    for item in segments:
+      print(item.path if args.paths_only else f"  segment {item.segment:>3}: {_human_bytes(item.size):>10}  {item.path}")
   return 0
 
 
-def _summarize(paths: list[Path]) -> tuple[Counter[str], Counter[str], int, Counter[tuple[int, int, int]]]:
-  reasons: Counter[str] = Counter()
-  buttons: Counter[str] = Counter()
-  invalid_lines = 0
-  inventory: Counter[tuple[int, int, int]] = Counter()
+def _paths_for_summary(args: argparse.Namespace) -> list[Path]:
+  if args.paths:
+    return [Path(value).expanduser() for value in args.paths]
+  routes = _selected(args)
+  return [item.path for _route, segments in routes for item in segments]
+
+
+def _read_rlogs(paths: list[Path]):
+  """Decode local rlogs without importing the network-aware LogReader toolchain."""
+  import bz2
+
+  import zstandard as zstd
+
+  from openpilot.cereal import log as capnp_log
+
   for path in paths:
-    try:
-      compressed = path.name.endswith((".gz", ".gz.active"))
-      with gzip.open(path, "rt", encoding="utf-8") if compressed else path.open(encoding="utf-8") as stream:
-        for line in stream:
-          try:
-            record = json.loads(line)
-          except json.JSONDecodeError:
-            invalid_lines += 1
-            continue
-          if record.get("type") == "can_batch":
-            reasons["raw_can_batch"] += 1
-            for bus, address, payload in record["frames"]:
-              inventory[(bus, address, len(payload) // 2)] += 1
-          if record.get("type") != "can_frame":
-            continue
-          reason = str(record.get("reason", "unknown"))
-          reasons[reason] += 1
-          if reason in ("button_press", "button_change"):
-            for name in record.get("pressed_buttons", record.get("decoded", {}).get("names", [])):
-              buttons[str(name)] += 1
-    except (OSError, EOFError):
-      invalid_lines += 1
-  return reasons, buttons, invalid_lines, inventory
+    if path.suffix == ".zst":
+      with path.open("rb") as compressed, zstd.ZstdDecompressor().stream_reader(compressed) as reader:
+        data = reader.read()
+    elif path.suffix == ".bz2":
+      data = bz2.decompress(path.read_bytes())
+    else:
+      data = path.read_bytes()
+    yield from capnp_log.Event.read_multiple_bytes(data)
 
 
 def command_summary(args: argparse.Namespace) -> int:
-  root = default_log_root()
-  paths = [Path(path) for path in args.paths] if args.paths else _log_files(root, args.include_active)
-  reasons, buttons, invalid_lines, inventory = _summarize(paths)
+  paths = _paths_for_summary(args)
+  if not paths:
+    print(f"No rlog segments found in {_root(args)}")
+    return 1
+  missing = [path for path in paths if not path.is_file()]
+  if missing:
+    for path in missing:
+      print(f"Missing rlog: {path}")
+    return 1
+
+  report = scan_can_messages(_read_rlogs(paths))
+  report["files"] = [str(path) for path in paths]
+
+  if args.json:
+    output = Path(args.json).expanduser()
+    output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(f"Wrote {output}")
+
   print(f"Files: {len(paths)}")
-  if reasons["raw_can_batch"]:
-    print("Discovery recordings contain raw CAN; button events have not been decoded.")
-    print(f"Physical frames: {sum(inventory.values())}; distinct streams: {len(inventory)}")
-    for (bus, address, length), count in sorted(inventory.items()):
-      print(f"  bus {bus}, 0x{address:X}, {length} bytes: {count}")
-  else:
-    print(f"Button presses: {dict(sorted(buttons.items()))}")
-  print(f"Record reasons: {dict(sorted(reasons.items()))}")
-  print(f"Unreadable/truncated lines: {invalid_lines}")
+  print(f"Physical CAN frames: {report['physical_frames']}")
+  print(f"CAN events: {report['can_events']}; ignored TX receipts: {report['ignored_tx_receipts']}")
+  print(f"Distinct bus/address/length streams: {len(report['streams'])}")
+  if report["invalid_events"]:
+    print(f"Unreadable events/frames: {report['invalid_events']}")
+  print(f"Most-changing streams (top {args.top}):")
+  for row in report["streams"][:args.top]:
+    capped = "+" if row["distinct_payloads_capped"] else ""
+    description = f"bus {row['bus']}, {row['address_hex']}, {row['length']} bytes: "
+    description += f"{row['frames']} frames, {row['transitions']} transitions, "
+    description += f"{row['distinct_payloads']}{capped} payloads, mask {row['changed_bits_mask_hex']}"
+    print(f"  {description}")
   return 0
 
 
+def _add_common(parser: argparse.ArgumentParser, *, latest: int = 1) -> None:
+  parser.add_argument("--root", default=os.environ.get("LOG_ROOT", DEFAULT_LOG_ROOT), help="loggerd realdata directory")
+  parser.add_argument("--latest", type=int, default=latest, choices=range(1, 101), metavar="N", help="number of newest routes")
+
+
 def build_parser() -> argparse.ArgumentParser:
-  parser = argparse.ArgumentParser(description="Inspect automatic Toyota TSS3 passive-recorder logs")
+  parser = argparse.ArgumentParser(description="Find and inspect loggerd rlogs for passive Toyota TSS3 research")
   commands = parser.add_subparsers(dest="command", required=True)
 
-  status = commands.add_parser("status", help="show recorder health and counters")
+  status = commands.add_parser("status", help="show whether loggerd rlogs are available")
+  _add_common(status)
   status.set_defaults(function=command_status)
 
-  listing = commands.add_parser("list", help="list locally retained logs")
-  listing.add_argument("--include-active", action="store_true", help="also show the current in-progress part")
+  listing = commands.add_parser("list", help="list rlogs for recent routes")
+  _add_common(listing, latest=3)
+  listing.add_argument("--paths-only", action="store_true", help="print one copyable rlog path per line")
   listing.set_defaults(function=command_list)
 
-  summary = commands.add_parser("summary", help="count button edges in logs")
-  summary.add_argument("paths", nargs="*", help="specific logs; defaults to all completed logs")
-  summary.add_argument("--include-active", action="store_true", help="include the current in-progress part")
+  summary = commands.add_parser("summary", help="manually scan local rlogs; run only while parked/off-road")
+  _add_common(summary)
+  summary.add_argument("paths", nargs="*", help="specific rlogs; defaults to the newest route")
+  summary.add_argument("--top", type=int, default=50, choices=range(1, 1001), metavar="N", help="number of streams to print")
+  summary.add_argument("--json", metavar="PATH", help="also write the complete inventory as JSON")
   summary.set_defaults(function=command_summary)
   return parser
 

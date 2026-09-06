@@ -1,19 +1,25 @@
 # comma dashcam telemetry
 
-## TSS3 automatic passive button-recorder branch
+## TSS3 passive rlog-retrieval branch
 
-This `tss3-passive-recorder` branch adds an automatic **receive-only** recorder for Toyota TSS3
-cruise-button research. Discovery v2 starts with each on-road session, records all physical CAN
-frames delivered by openpilot, and stores a compressed, bounded local archive for later SSH retrieval. It has no CAN publisher, makes
-no panda safety change, and never starts the separate transmission experiment.
+This `tss3-passive-recorder` branch supports Toyota TSS3 cruise-button research without adding an
+on-road recorder. openpilot's existing native `loggerd` already stores the complete cereal `can`
+service in each `rlog.zst`. The branch adds a lightweight, read-only SSH helper to locate those
+rlogs and, when explicitly requested while parked, build a bounded CAN-change inventory.
 
-The target vehicle owner reports that the Toyota pin-swap is already installed. The recorder does
-not depend on a hard-coded bus number: it observes every physical panda source bus and preserves the
-bus with each record. It does not inspect, validate, or change the pin-swap wiring.
+An earlier discovery build duplicated the full CAN stream in Python, expanded it to JSON and
+compressed it during every drive. That design was removed because it unnecessarily competed with
+openpilot for CPU, memory, messaging and storage. There is now no extra manager process and no
+additional work during a drive.
 
-The first captures did not show button transitions despite confirmed physical presses and stock
-set-speed changes. Discovery v2 removes the original two-address/eight-byte filter so the actual
-message layout can be investigated. It reports raw traffic inventory instead of assuming button names.
+The target vehicle owner reports that the Toyota pin-swap is already installed. The manual analyzer
+does not depend on a hard-coded bus number: it inventories every physical panda source bus preserved
+in the rlog. It does not inspect, validate, or change the pin-swap wiring.
+
+The first narrow JSONL captures did not show button transitions despite confirmed physical presses
+and stock set-speed changes. The next capture should therefore use every `rlog.zst` segment from the
+test route instead of assuming an address, bus, payload length or button decoder. Copy rlogs promptly;
+normal openpilot retention and uploading rules still apply.
 
 On the comma Custom Software screen, install this branch with:
 
@@ -21,7 +27,7 @@ On the comma Custom Software screen, install this branch with:
 spanconstant5/tss3-passive-recorder
 ```
 
-See [Automatic TSS3 cruise-button recorder](docs/TSS3_CRUISE_RECORDER.md) before installing.
+See [Passive TSS3 rlog collection](docs/TSS3_CRUISE_RECORDER.md) before installing.
 
 > **First alpha build:** `v0.1.0-alpha.1` is the first public testing build of this project.
 > It has not been validated on comma hardware or in a vehicle. Expect incomplete fields and UI

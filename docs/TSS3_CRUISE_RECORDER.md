@@ -1,72 +1,53 @@
-# Automatic Toyota TSS3 cruise-button recorder
+# Passive Toyota TSS3 rlog collection
 
 ## What this branch does
 
-Install the branch once and use the comma normally. Whenever openpilot enters its on-road state,
-the process manager starts `tss3cruiseprobed`. **Discovery v2** records all physical CAN frames
-delivered to its cereal subscriber, including other addresses, short frames and longer payloads.
-It preserves every delivered payload, its bus, message order within a batch, and the batch timestamp.
-It applies no button decoder or address filter. TX-return/rejection receipts are counted and excluded.
+Install the branch and use the comma normally. It adds **no recorder process**. openpilot's existing
+native `loggerd` already records all messages on the cereal `can` service into the route's
+`rlog.zst` files. The added SSH helper only finds those files and can analyze them after a test.
 
-The original recorder watched only `0x24D` and `0x1D3`, requiring eight-byte payloads. The two
-September 5 captures contained 720 and 800 retained `0x24D` records respectively, on buses 0 and 2,
-with no decoded button transitions or `0x1D3` records. The owner confirmed actual cruise-button
-presses and stock set-speed changes during both captures. The limited recordings cannot distinguish
-an address/layout mismatch, a payload-length mismatch, or traffic inaccessible through the current
-wiring/receive path. Discovery v2 removes those software filtering assumptions.
+This is intentionally different from the earlier Discovery v2 build. That version subscribed to
+all CAN traffic in Python, converted each frame to JSON and gzip-compressed another archive while
+on-road. It duplicated data already present in rlogs and could put unnecessary load on a comma. The
+duplicate daemon, manager registration, JSON archive, rotation code and RAM status file have all
+been removed.
 
-Recording is best effort: it only sees traffic supplied by pandad to this subscriber. It does not
-prove that every frame on every vehicle network is visible or that the underlying queue lost none.
-Each log records event validity and source/receive timestamps; status includes counts per bus,
-address and length, plus maximum observed delivery age. No CAN transmission is introduced.
+The first two narrow captures watched `0x24D` and `0x1D3`. They retained 720 and 800 `0x24D`
+records on buses 0 and 2, but showed no button transitions even though the owner pressed the stock
+buttons and changed the displayed Toyota set speed. Those recordings are inconclusive. A complete
+rlog avoids assuming the address, bus, payload length or decoder before seeing the evidence.
 
-## Pin-swap hardware context
+## Safety and resource boundary
 
-The target vehicle owner reports that the Toyota pin-swap is already installed. That is important
-provenance for these captures, but it is not something software can verify. The recorder does not
-assume a fixed bus number: it watches every physical panda source bus (`src < 0x80`) and stores the
-observed bus with every retained frame.
+- No extra process starts at boot, ignition, or on-road transition.
+- No code subscribes to live CAN for this experiment.
+- No CAN publisher or `sendcan` path is present.
+- No frame is created, replayed, acknowledged, blocked, or modified.
+- No panda safety setting, Toyota control code, or stock fallback behavior changes.
+- Normal openpilot `loggerd`, uploader and deleter behavior is left intact.
+- Analysis runs only when you explicitly invoke `summary`; do that parked and off-road.
 
-Document the pin-swap version, orientation, and any harness labels alongside the logs. If a capture
-contains no target frames, treat that as an inconclusive wiring/routing result—not proof that the
-vehicle never sends the messages. Verify harness seating and the intended pin map with vehicle
-power removed; do not insert, remove, or repin a powered harness.
+The helper cannot prove that the panda can physically see a network behind the harness. It only
+reports traffic already received and logged by openpilot. The owner reports that the Toyota pin-swap
+is installed; record its version and orientation with each test because software cannot verify it.
+Inspect or change harness wiring only with vehicle power removed.
 
-## Safety boundary
+## Install
 
-The automatic component is receive-only:
-
-- it subscribes to `can` and has no `sendcan` publisher;
-- it ignores panda TX-return and TX-rejection receipts (`src >= 0x80`);
-- it never creates or replays a CAN frame;
-- it changes no panda safety configuration or vehicle actuation code;
-- it does not import or start the separate one-shot admission/transmit experiment.
-
-The stock Toyota behavior and openpilot behavior are therefore unchanged by this recorder. This is
-still an unvalidated research build: test parked first, keep control of the vehicle, and return to
-known-good software if the comma behaves unexpectedly.
-
-## Install like other custom comma software
-
-On the comma setup screen, choose **Custom Software** and enter:
+On the comma Custom Software screen, enter:
 
 ```text
 spanconstant5/tss3-passive-recorder
 ```
 
-The expanded installer address is:
+The installer expands that to:
 
 ```text
 https://installer.comma.ai/spanconstant5/tss3-passive-recorder
 ```
 
-This installs the branch from `spanconstant5/openpilot`. After installation, there is no separate
-service setup, boot script, PID file, or start command. The recorder is a normal openpilot manager
-process and starts on every on-road transition. It stops and finalizes the current file when the
-comma returns off-road.
-
-To update an existing installation of this recorder branch over SSH, first confirm
-`git branch --show-current` prints `tss3-passive-recorder`. Then:
+To update an existing checkout over SSH, confirm `git branch --show-current` says
+`tss3-passive-recorder`, then run:
 
 ```sh
 cd /data/openpilot
@@ -75,105 +56,92 @@ git merge --ff-only FETCH_HEAD
 sudo reboot
 ```
 
-Do not copy the recorder into the checkout by hand. A dirty openpilot checkout can interfere with
-normal fork updates.
+The reboot is important when upgrading from Discovery v2 because it guarantees the removed Python
+recorder is no longer running.
 
-## Where the logs live
+## Run a parked button test
 
-```text
-/data/tss3-cruise-probe/logs/
-```
+1. Park safely. Do not combine this passive collection with a transmit experiment.
+2. Start the car and let comma reach its normal on-road screen.
+3. Note the wall-clock start time.
+4. Press and release one stock cruise button at a time, five times each, several seconds apart.
+5. Say the button name aloud or write down the button order and approximate times.
+6. Include changes made by both short presses and press-and-hold, but do not create a traffic hazard.
+7. End the drive and wait for comma to return fully off-road before inspecting the logs.
 
-Each ignition/on-road session receives a unique ID. Discovery files end in `.jsonl.gz.active` while
-being written, then are renamed to `.jsonl.gz` on normal stop or rotation. An unfinished file from
-an interrupted reboot is retained with `.recovered.jsonl.gz` at the next start. A missing gzip
-footer or incomplete last line is reported by the summary tool; earlier flushed records may still
-be recovered. Abrupt power loss can lose buffered data. Older `.jsonl` recordings remain readable.
+Use at least two independent test drives before treating a signal assignment as repeatable. Capture
+variation can come from route segmentation, startup timing, vehicle state, wiring, dropped traffic,
+or a signal that uses a counter/checksum alongside the actual button bits.
 
-Parts rotate after 30 minutes or 8 MiB of uncompressed JSON, whichever comes first when writing.
-Compression uses the Python standard library at its fastest level. Completed logs are capped at 256
-MiB. The oldest completed parts are pruned when that cap is exceeded or the device has less than
-2 GiB free. Free space is checked at least every five seconds while processing. If pruning cannot
-restore the floor, recording pauses and retries. The active part is additional to the completed-log
-cap. Keep this directory dedicated to recordings: matching completed JSONL/gzip files are eligible
-for pruning. Files outside this directory are not pruned. Files are private to the device user.
+## Find the files over SSH
 
-The live status file is in RAM at:
-
-```text
-/dev/shm/tss3_cruise_probe_status.json
-```
-
-It reports capture version, recorder state, buses found, raw frame counts, traffic inventory, active
-filename, archive size, last receive time, and the latest error. It does not report inferred button
-counts in discovery mode. Final session statistics are retained in the stopped status and saved to
-the archive on orderly shutdown. Status uses RAM rather than repeated flash writes.
-
-## Check it later over SSH
-
-After connecting to the comma:
+After the drive is over:
 
 ```sh
 cd /data/openpilot
 python -m openpilot.system.tss3_cruise_recorder.control status
-python -m openpilot.system.tss3_cruise_recorder.control list
-python -m openpilot.system.tss3_cruise_recorder.control summary
+python -m openpilot.system.tss3_cruise_recorder.control list --latest 3
 ```
 
-After updating, `status` must show `discovery-v2`. To include the currently open file in a list or
-summary, add `--include-active`; an active gzip file may report truncation until finalized.
-Copy **all parts** of a completed test after the drive ends.
+The normal log root is `/data/media/0/realdata`. Each drive is split into roughly one-minute route
+directories, and each directory has its own `rlog.zst`. Copy **every segment from the test route**.
+Do not substitute `qlog.zst`: qlogs contain only a heavily decimated CAN subset.
 
-From a computer with SSH access to the comma, replace `DEVICE_IP` and choose a local destination:
+For a clean, one-path-per-line list:
 
 ```sh
-scp "comma@DEVICE_IP:/data/tss3-cruise-probe/logs/*.jsonl.gz" .
+python -m openpilot.system.tss3_cruise_recorder.control list --latest 1 --paths-only
 ```
 
-The compressed files contain raw payloads and timestamps. Broader CAN traffic can contain vehicle
-identifiers and other sensitive data; its contents are not privacy-filtered. Keep the capture private.
+From the computer, copy each printed path with `scp`. For example:
 
-Each `can_batch` record has `frames` entries `[bus, address, data_hex]`. `mono_time_ns` is the
-cereal event timestamp, shared by the batch; `received_mono_ns` and `wall_time_ns` are local receive
-times. Every part's header identifies `capture.version=discovery-v2` and the field order. The old
-decoder remains available for research, but is not part of the automatic discovery capture path.
+```sh
+scp "comma@DEVICE_IP:/data/media/0/realdata/ROUTE--*/rlog.zst" ./tss3-test-1/
+```
 
-## First parked test
+Replace `DEVICE_IP` and `ROUTE` with the values printed by the helper. Quoting keeps wildcard
+expansion on the comma. If that `scp` client does not accept the wildcard, copy the printed paths
+one at a time. Retrieve the route promptly: openpilot's normal uploader/deleter may eventually move
+or remove local segments. This branch does not pin logs or change retention policy.
 
-1. With vehicle power removed, confirm the existing pin-swap harness is seated and record its
-   version/orientation without changing the wiring.
-2. Install the branch and reboot.
-3. Turn the vehicle on while safely parked and wait for the normal on-road UI.
-4. Press and release one stock cruise button at a time, noting the order and approximate time.
-5. Turn the vehicle off and wait for the comma to return off-road.
-6. SSH in and run `status`, `list`, and `summary` above.
-7. Confirm `discovery-v2`, nonzero physical frame counts, and an inventory of addresses/lengths.
-   Record the order and approximate times of presses (several seconds apart); send all compressed
-   parts together with those notes. The summary intentionally does not label buttons yet.
+## Optional off-road inventory
 
-Do not perform an active CAN test as part of this checklist. Transmit testing remains separate,
-manual, parked-only, and explicitly gated in the standalone research repository.
+The full rlogs are the primary evidence. You can also generate an initial inventory on the comma,
+but only after the drive while parked/off-road:
 
-## Architecture and failure behavior
+```sh
+cd /data/openpilot
+python -m openpilot.system.tss3_cruise_recorder.control summary --latest 1 --top 50
+python -m openpilot.system.tss3_cruise_recorder.control summary --latest 1 --json /data/tss3-can-inventory.json
+```
+
+`summary` reads the selected rlogs once and reports each physical bus/address/length stream, frame
+count, number of payload transitions, bounded distinct-payload count, and a bit-change mask. It
+ignores panda TX receipts (`src >= 0x80`). The distinct-payload set is capped at 256 per stream so
+the manual analyzer's memory use remains bounded. A trailing `+` means the cap was reached.
+
+The inventory does not identify a button by itself. Normal counters, checksums, wheel speed and many
+other signals change frequently. Correlation requires the press order/times and preferably a quiet
+parked control period. Preserve the raw rlogs even if you also send the JSON inventory.
+
+## Architecture
 
 ```text
-pandad physical CAN receive stream
-              |
-              v
- tss3cruiseprobed (subscriber only)
-              |
- all physical addresses and lengths
-              |
-              v
- bounded gzip JSONL archive + RAM status
+pandad -> cereal can -> native loggerd -> existing rlog.zst
+                                           |
+                                  SSH list/copy helper
+                                           |
+                          optional manual off-road summary
 ```
 
-The process is registered with openpilot's `only_onroad` lifecycle and `restart_if_crash=True`.
-Messaging or storage failures put only this recorder into bounded retry/backoff; they do not change
-stock cruise, openpilot controls, or panda safety. Manager shutdown sends a normal signal and the
-recorder finalizes promptly. If it is forcibly interrupted, the `.active` recovery behavior above
-preserves the partial evidence.
+There is no experiment-specific component in the live path. Switching to another branch leaves no
+background service to disable. Old `/data/tss3-cruise-probe/logs` JSONL files from Discovery v2 are
+not deleted automatically; they can be copied or removed later by the owner.
 
-To stop automatic recording, switch the comma to another openpilot branch or reinstall known-good
-software. Existing files under `/data/tss3-cruise-probe/logs` are intentionally preserved so a
-software switch does not silently discard the experiment.
+## Privacy and limitations
+
+Rlogs contain much more than cruise-button traffic, including vehicle state, location and device
+information. Treat them as sensitive and share them only with people you trust. This tooling is an
+unvalidated research aid, not proof that a message is safe to transmit and not authorization to
+weaken panda safety. Any later active test must remain separate, explicitly armed, parked-only and
+within existing panda safety limits, with stock behavior as the fallback.
