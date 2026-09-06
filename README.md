@@ -2,7 +2,7 @@
 
 ## TSS3 passive rlog-retrieval branch
 
-This `tss3-passive-recorder` branch supports Toyota TSS3 cruise-button research without adding an
+This `tss3` branch supports Toyota TSS3 cruise-button research without adding an
 on-road recorder. openpilot's existing native `loggerd` already stores the complete cereal `can`
 service in each `rlog.zst`. The branch adds a lightweight, read-only SSH helper to locate those
 rlogs and, when explicitly requested while parked, build a bounded CAN-change inventory.
@@ -24,7 +24,7 @@ normal openpilot retention and uploading rules still apply.
 On the comma Custom Software screen, install this branch with:
 
 ```text
-spanconstant5/tss3-passive-recorder
+spanconstant5/tss3
 ```
 
 See [Passive TSS3 rlog collection](docs/TSS3_CRUISE_RECORDER.md) before installing.

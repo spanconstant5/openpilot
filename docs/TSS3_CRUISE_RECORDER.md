@@ -37,21 +37,21 @@ Inspect or change harness wiring only with vehicle power removed.
 On the comma Custom Software screen, enter:
 
 ```text
-spanconstant5/tss3-passive-recorder
+spanconstant5/tss3
 ```
 
 The installer expands that to:
 
 ```text
-https://installer.comma.ai/spanconstant5/tss3-passive-recorder
+https://installer.comma.ai/spanconstant5/tss3
 ```
 
-To update an existing checkout over SSH, confirm `git branch --show-current` says
-`tss3-passive-recorder`, then run:
+To update an existing checkout over SSH, confirm `git branch --show-current` says `tss3` (an older
+installation may still say `tss3-passive-recorder`), then run:
 
 ```sh
 cd /data/openpilot
-git fetch origin tss3-passive-recorder
+git fetch origin tss3
 git merge --ff-only FETCH_HEAD
 sudo reboot
 ```
