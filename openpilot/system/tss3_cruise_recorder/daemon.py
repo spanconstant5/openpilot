@@ -11,7 +11,7 @@ from types import FrameType
 from openpilot.cereal.messaging import recv_one, sub_sock
 from openpilot.common.swaglog import cloudlog
 
-from .session import PassiveRecorderSession, RecorderStats
+from .discovery import CAPTURE_METADATA, DiscoverySession
 from .storage import ArchiveWriter, StatusStore, archive_size, default_log_root, utc_text
 
 
@@ -25,13 +25,14 @@ class RecorderDaemon:
     self.status = StatusStore()
     self.last_status_ns = 0
     self.last_error: str | None = None
+    self.last_session: DiscoverySession | None = None
 
   def request_stop(self, _signum: int | None = None, _frame: FrameType | None = None) -> None:
     self.stop_requested = True
 
   def _status_value(self, state: str, now_mono_ns: int, now_wall_ns: int,
-                    session: PassiveRecorderSession | None = None) -> dict[str, object]:
-    stats = session.stats if session is not None else RecorderStats()
+                    session: DiscoverySession | None = None) -> dict[str, object]:
+    session = session or self.last_session
     active_path = session.writer.active_path if session is not None else None
     return {
       "schema_version": 1,
@@ -43,21 +44,12 @@ class RecorderDaemon:
       "log_root": str(default_log_root()),
       "active_file": str(active_path) if active_path is not None else None,
       "archive_bytes": archive_size(default_log_root()),
-      "observed_target_frames": stats.observed_frames,
-      "selected_frames": stats.selected_frames,
-      "ignored_non_physical": stats.ignored_non_physical,
-      "ignored_wrong_length": stats.ignored_wrong_length,
-      "discovered_buses": sorted(stats.discovered_buses),
-      "press_edges": stats.press_edges,
-      "release_edges": stats.release_edges,
-      "button_presses": dict(sorted(stats.button_presses.items())),
-      "last_physical_frame_mono_ns": stats.last_physical_frame_mono_ns,
-      "last_physical_frame_wall_time_ns": stats.last_physical_frame_wall_ns,
+      **(session.snapshot() if session is not None else {"capture_version": "discovery-v2"}),
       "last_error": self.last_error,
     }
 
   def _write_status(self, state: str, now_mono_ns: int, now_wall_ns: int,
-                    session: PassiveRecorderSession | None = None, force: bool = False) -> None:
+                    session: DiscoverySession | None = None, force: bool = False) -> None:
     if not force and now_mono_ns - self.last_status_ns < STATUS_INTERVAL_NS:
       return
     try:
@@ -75,12 +67,14 @@ class RecorderDaemon:
     backoff_seconds = 1.0
     while not self.stop_requested:
       writer: ArchiveWriter | None = None
-      session: PassiveRecorderSession | None = None
+      session: DiscoverySession | None = None
       try:
         start_mono_ns = time.monotonic_ns()
         start_wall_ns = time.time_ns()
-        writer = ArchiveWriter(start_mono_ns=start_mono_ns, start_wall_ns=start_wall_ns)
-        session = PassiveRecorderSession(writer)
+        writer = ArchiveWriter(start_mono_ns=start_mono_ns, start_wall_ns=start_wall_ns,
+                               compressed=True, metadata=CAPTURE_METADATA)
+        session = DiscoverySession(writer)
+        self.last_session = session
         can_socket = sub_sock("can", conflate=False, timeout=1000)
         self.last_error = None
         self._write_status("running", start_mono_ns, start_wall_ns, session, force=True)
@@ -89,10 +83,12 @@ class RecorderDaemon:
           message = recv_one(can_socket)
           now_mono_ns = time.monotonic_ns()
           now_wall_ns = time.time_ns()
-          edge_seen = session.process_message(message, now_mono_ns, now_wall_ns) if message is not None else False
           if message is not None:
+            session.process_message(message, now_mono_ns, now_wall_ns)
             backoff_seconds = 1.0
-          self._write_status("running", now_mono_ns, now_wall_ns, session, force=edge_seen)
+          else:
+            writer.maintain(now_mono_ns)
+          self._write_status("running", now_mono_ns, now_wall_ns, session)
 
       except KeyboardInterrupt:
         self.stop_requested = True
@@ -108,6 +104,8 @@ class RecorderDaemon:
       finally:
         if writer is not None:
           try:
+            if session is not None:
+              writer.write([{"type": "capture_summary", **session.snapshot()}], time.monotonic_ns(), time.time_ns())
             writer.close(time.monotonic_ns(), time.time_ns(), "shutdown" if self.stop_requested else "retry")
           except OSError:
             writer.abort()

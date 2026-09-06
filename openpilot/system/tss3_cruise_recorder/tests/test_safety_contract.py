@@ -11,7 +11,7 @@ class TestSafetyContract(unittest.TestCase):
   def test_daemon_has_no_transmit_surface(self):
     source = "\n".join(
       (PACKAGE_ROOT / filename).read_text(encoding="utf-8")
-      for filename in ("daemon.py", "session.py")
+      for filename in ("daemon.py", "session.py", "discovery.py")
     )
     tree = ast.parse(source)
     imported = {

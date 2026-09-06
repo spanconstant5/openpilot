@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import time
 from collections import Counter
@@ -22,7 +23,7 @@ def _human_bytes(value: int) -> str:
 
 
 def _log_files(root: Path, include_active: bool = False) -> list[Path]:
-  patterns = ("*.jsonl", "*.active") if include_active else ("*.jsonl",)
+  patterns = ("*.jsonl", "*.jsonl.gz", "*.active") if include_active else ("*.jsonl", "*.jsonl.gz")
   return sorted(
     (path for pattern in patterns for path in root.glob(pattern) if path.is_file() and not path.is_symlink()),
     key=lambda path: (path.stat().st_mtime_ns, path.name),
@@ -47,8 +48,19 @@ def command_status(_args: argparse.Namespace) -> int:
   print(f"State: {value.get('state', 'unknown')} ({value.get('mode', 'unknown')})")
   print(f"Status age: {age_seconds:.1f} seconds" if age_seconds is not None else "Status age: unknown")
   print(f"Buses seen: {value.get('discovered_buses', [])}")
-  print(f"Button press/release edges: {value.get('press_edges', 0)}/{value.get('release_edges', 0)}")
-  print(f"Buttons: {value.get('button_presses', {})}")
+  if value.get("capture_version") == "discovery-v2":
+    print("Capture: discovery-v2 (all physical CAN received, no button decoding)")
+    print(f"Physical frames: {value.get('physical_frames', 0)}; invalid source batches: {value.get('invalid_batches', 0)}")
+    print(f"Distinct bus/address/length combinations: {len(value.get('inventory', []))}")
+    last_receive = value.get("last_receive_mono_ns")
+    if isinstance(last_receive, int) and value.get("state") == "running":
+      print(f"Last CAN batch received: {max(0, time.monotonic_ns() - last_receive) / 1e9:.1f} seconds ago")
+    for item in value.get("inventory", []):
+      if item["address_hex"] in ("0x24D", "0x1D3"):
+        print(f"  {item['address_hex']} bus {item['bus']}, {item['length']} bytes: {item['frames']} frames")
+  else:
+    print(f"Button press/release edges: {value.get('press_edges', 0)}/{value.get('release_edges', 0)}")
+    print(f"Buttons: {value.get('button_presses', {})}")
   print(f"Archive: {_human_bytes(int(value.get('archive_bytes', 0)))} at {value.get('log_root', default_log_root())}")
   print(f"Active file: {value.get('active_file') or 'none'}")
   print(f"Last error: {value.get('last_error') or 'none'}")
@@ -67,19 +79,25 @@ def command_list(args: argparse.Namespace) -> int:
   return 0
 
 
-def _summarize(paths: list[Path]) -> tuple[Counter[str], Counter[str], int]:
+def _summarize(paths: list[Path]) -> tuple[Counter[str], Counter[str], int, Counter[tuple[int, int, int]]]:
   reasons: Counter[str] = Counter()
   buttons: Counter[str] = Counter()
   invalid_lines = 0
+  inventory: Counter[tuple[int, int, int]] = Counter()
   for path in paths:
     try:
-      with path.open(encoding="utf-8") as stream:
+      compressed = path.name.endswith((".gz", ".gz.active"))
+      with gzip.open(path, "rt", encoding="utf-8") if compressed else path.open(encoding="utf-8") as stream:
         for line in stream:
           try:
             record = json.loads(line)
           except json.JSONDecodeError:
             invalid_lines += 1
             continue
+          if record.get("type") == "can_batch":
+            reasons["raw_can_batch"] += 1
+            for bus, address, payload in record["frames"]:
+              inventory[(bus, address, len(payload) // 2)] += 1
           if record.get("type") != "can_frame":
             continue
           reason = str(record.get("reason", "unknown"))
@@ -87,17 +105,23 @@ def _summarize(paths: list[Path]) -> tuple[Counter[str], Counter[str], int]:
           if reason in ("button_press", "button_change"):
             for name in record.get("pressed_buttons", record.get("decoded", {}).get("names", [])):
               buttons[str(name)] += 1
-    except OSError:
+    except (OSError, EOFError):
       invalid_lines += 1
-  return reasons, buttons, invalid_lines
+  return reasons, buttons, invalid_lines, inventory
 
 
 def command_summary(args: argparse.Namespace) -> int:
   root = default_log_root()
   paths = [Path(path) for path in args.paths] if args.paths else _log_files(root, args.include_active)
-  reasons, buttons, invalid_lines = _summarize(paths)
+  reasons, buttons, invalid_lines, inventory = _summarize(paths)
   print(f"Files: {len(paths)}")
-  print(f"Button presses: {dict(sorted(buttons.items()))}")
+  if reasons["raw_can_batch"]:
+    print("Discovery recordings contain raw CAN; button events have not been decoded.")
+    print(f"Physical frames: {sum(inventory.values())}; distinct streams: {len(inventory)}")
+    for (bus, address, length), count in sorted(inventory.items()):
+      print(f"  bus {bus}, 0x{address:X}, {length} bytes: {count}")
+  else:
+    print(f"Button presses: {dict(sorted(buttons.items()))}")
   print(f"Record reasons: {dict(sorted(reasons.items()))}")
   print(f"Unreadable/truncated lines: {invalid_lines}")
   return 0

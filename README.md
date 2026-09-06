@@ -3,13 +3,17 @@
 ## TSS3 automatic passive button-recorder branch
 
 This `tss3-passive-recorder` branch adds an automatic **receive-only** recorder for Toyota TSS3
-cruise-button research. It starts with each on-road session, watches physical CAN IDs `0x24D` and
-`0x1D3`, and stores a bounded local archive for later SSH retrieval. It has no CAN publisher, makes
+cruise-button research. Discovery v2 starts with each on-road session, records all physical CAN
+frames delivered by openpilot, and stores a compressed, bounded local archive for later SSH retrieval. It has no CAN publisher, makes
 no panda safety change, and never starts the separate transmission experiment.
 
 The target vehicle owner reports that the Toyota pin-swap is already installed. The recorder does
 not depend on a hard-coded bus number: it observes every physical panda source bus and preserves the
 bus with each record. It does not inspect, validate, or change the pin-swap wiring.
+
+The first captures did not show button transitions despite confirmed physical presses and stock
+set-speed changes. Discovery v2 removes the original two-address/eight-byte filter so the actual
+message layout can be investigated. It reports raw traffic inventory instead of assuming button names.
 
 On the comma Custom Software screen, install this branch with:
 
