@@ -28,4 +28,4 @@ jobs:
       - name: Run Corolla Panda safety tests
         run: pytest -q opendbc_repo/opendbc/safety/tests/test_toyota_tss3.py
       - name: Run Corolla fingerprint tool tests
-        run: pytest -q tools/tests/test_corolla_tss3_fingerprint.py tools/tests/test_corolla_tss3_census.py
+        run: pytest -q -o addopts='' --confcutdir=tools/tests tools/tests/test_corolla_tss3_fingerprint.py tools/tests/test_corolla_tss3_census.py
