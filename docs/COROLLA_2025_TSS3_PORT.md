@@ -59,5 +59,23 @@ It does not prove that every vehicle-level CAN signal and calibration is identic
   EPS torque, so `steeringPressed` remains false rather than guessing.
 - Exact 2025 vehicle mass, steering tuning, automatic CAN fingerprint, and
   standard diagnostic firmware-query mapping remain unresolved.
-- The supplied route logs were not part of the archive, so this port has not been
-  independently replay-tested against them.
+- The reported route-24 and route-28 control logs were not part of the archive
+  or later rlog supply, so this port has not been independently replay-tested
+  against those control sessions.
+
+## Supplied CAN census
+
+Two later user-supplied rlogs were processed offline. The segment-10 raw file is
+byte-identical to the decompressed rlog already pinned by `ghidra_rh850` (raw
+SHA-256 `98710e8d23a40796718b7be566efc83a569be90ece59b5d7f70377143e38338b`).
+Its logical bus 1 contains the tracked 147 address/DLC pairs. The additional
+startup rlog expands the union to 152 pairs; processing the segment-10 rlog
+second adds no new address. Logical bus 0 contains the stable 22-message ADAS
+CAN FD geometry.
+
+The 152-entry union is retained in
+`opendbc/car/toyota/tss3_census.py` for parser and review evidence. It is not in
+`FINGERPRINTS`: the evidence authority records the Corolla census as overlapping
+a TSS3 Camry census, and the moving rlog contains `carParams=MOCK` rather than an
+on-route F181 response. Automatic matching would therefore risk an ambiguous or
+wrong vehicle identity. Manual StarPilot selection remains the supported path.

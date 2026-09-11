@@ -2,7 +2,7 @@ name: Corolla TSS3 checks
 
 on:
   push:
-    branches: [starpilot-corolla-2025-tss3]
+    branches: [main, starpilot-corolla-2025-tss3]
   workflow_dispatch:
 
 jobs:
@@ -27,3 +27,5 @@ jobs:
         run: pytest -q opendbc_repo/opendbc/car/toyota/tests/test_tss3.py
       - name: Run Corolla Panda safety tests
         run: pytest -q opendbc_repo/opendbc/safety/tests/test_toyota_tss3.py
+      - name: Run Corolla fingerprint tool tests
+        run: pytest -q tools/tests/test_corolla_tss3_fingerprint.py tools/tests/test_corolla_tss3_census.py
