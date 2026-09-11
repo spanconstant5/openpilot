@@ -8,7 +8,7 @@ from opendbc.car.common.filter_simple import FirstOrderFilter
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.toyota.values import ToyotaFlags, ToyotaStarPilotFlags, CAR, DBC, STEER_THRESHOLD, NO_STOP_TIMER_CAR, \
                                                   TSS2_CAR, RADAR_ACC_CAR, EPS_SCALE, UNSUPPORTED_DSU_CAR, \
-                                                  SECOC_CAR, LEGACY_PRIUS_CAR
+                                                  SECOC_CAR, LEGACY_PRIUS_CAR, TSS3_PT_BUS
 
 ButtonType = structs.CarState.ButtonEvent.Type
 SteerControlType = structs.CarParams.SteerControlType
@@ -60,7 +60,7 @@ class CarState(CarStateBase):
     self.cluster_speed_hyst_gap = CV.KPH_TO_MS / 2.
     self.cluster_min_speed = CV.KPH_TO_MS / 2.
 
-    if CP.flags & ToyotaFlags.SECOC.value:
+    if CP.flags & ToyotaFlags.SECOC.value and not CP.flags & ToyotaFlags.CAN_FD.value:
       self.shifter_values = can_define.dv["GEAR_PACKET_HYBRID"]["GEAR"]
     else:
       self.shifter_values = can_define.dv["GEAR_PACKET"]["GEAR"]
@@ -93,7 +93,13 @@ class CarState(CarStateBase):
     self.auto_brake_hold = bool(self.CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD.value)
     self.pre_collision_2 = {}
 
+    self.tss3_accel_template: bytes | None = None
+    self.tss3_camera_accel = 0.0
+
   def update(self, can_parsers, starpilot_toggles) -> structs.CarState:
+    if self.CP.flags & ToyotaFlags.CAN_FD.value:
+      return self.update_tss3(can_parsers, starpilot_toggles)
+
     cp = can_parsers[Bus.pt]
     cp_cam = can_parsers[Bus.cam]
 
@@ -296,8 +302,78 @@ class CarState(CarStateBase):
 
     return ret, fp_ret
 
+  def update_tss3(self, can_parsers, starpilot_toggles):
+    """Decode the measured TSS 3.0 Corolla state and retain camera 0x160."""
+    cp = can_parsers[Bus.pt]
+    cp_cam = can_parsers[Bus.cam]
+    ret = structs.CarState()
+    fp_ret = custom.StarPilotCarState.new_message()
+
+    self.parse_wheel_speeds(ret,
+      cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_FL"],
+      cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_FR"],
+      cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_RL"],
+      cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_RR"],
+    )
+    ret.vEgoCluster = ret.vEgo * starpilot_toggles.cluster_offset
+    ret.standstill = abs(ret.vEgoRaw) < 1e-3
+    ret.steeringAngleDeg = cp.vl["STEER_ANGLE_ACC_STATUS"]["STEER_ANGLE"]
+    ret.steeringRateDeg = 0.0
+    ret.yawRate = cp.vl["KINEMATICS"]["YAW_RATE"]
+
+    # The four 0xDA torque fields have not been assigned to driver/EPS roles.
+    ret.steeringTorque = cp.vl["STEER_TORQUE_SENSOR"]["TORQUE_1"]
+    ret.steeringTorqueEps = cp.vl["STEER_TORQUE_SENSOR"]["TORQUE_2"]
+    ret.steeringPressed = False
+    ret.brakePressed = cp.vl["BRAKE_MODULE"]["BRAKE_PRESSED"] != 0
+    ret.gasPressed = cp.vl["GAS_PEDAL"]["GAS_PEDAL_USER"] != 0
+    ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(int(cp.vl["GEAR_PACKET"]["GEAR"]), None))
+
+    acc_state = int(cp.vl["STEER_ANGLE_ACC_STATUS"]["ACC_STATE"])
+    ret.cruiseState.available = acc_state != 0
+    ret.cruiseState.enabled = bool(cp.vl["STEER_ANGLE_ACC_STATUS"]["ACC_ENGAGED"])
+    ret.cruiseState.standstill = bool(cp.vl["STEER_ANGLE_ACC_STATUS"]["ACC_STANDSTILL"])
+    ret.cruiseState.speed = cp.vl["ACC_HUD"]["SET_SPEED"] * CV.MPH_TO_MS
+
+    ret.doorOpen = False
+    ret.seatbeltUnlatched = False
+    ret.leftBlinker = False
+    ret.rightBlinker = False
+    ret.steerFaultTemporary = False
+    ret.steerFaultPermanent = False
+    ret.buttonEvents = []
+
+    self.secoc_synchronization = copy.copy(cp.vl["SECOC_SYNCHRONIZATION"])
+    if cp_cam.can_valid:
+      adas = cp_cam.vl["ADAS_ACC_REQUEST"]
+      self.tss3_accel_template = bytes(int(adas[f"BYTE{k:02d}"]) & 0xFF for k in range(32))
+      self.tss3_camera_accel = float(adas["ACCEL_REQ"])
+    else:
+      self.tss3_accel_template = None
+
+    return ret, fp_ret
+
   @staticmethod
   def get_can_parsers(CP):
+    if CP.flags & ToyotaFlags.CAN_FD.value:
+      pt_messages = [
+        ("WHEEL_SPEEDS", 80),
+        ("STEER_ANGLE_ACC_STATUS", 40),
+        ("STEER_ANGLE_SENSOR", float('nan')),
+        ("KINEMATICS", float('nan')),
+        ("STEER_TORQUE_SENSOR", 42),
+        ("BRAKE_MODULE", 50),
+        ("GEAR_PACKET", float('nan')),
+        ("SECOC_SYNCHRONIZATION", 10),
+        ("ACC_CONTROL", 20),
+        ("GAS_PEDAL", 42),
+        ("ACC_HUD", float('nan')),
+      ]
+      return {
+        Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, TSS3_PT_BUS),
+        Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [("ADAS_ACC_REQUEST", 40)], 2),
+      }
+
     pt_messages = [
       ("BLINKERS_STATE", float('nan')),
     ]

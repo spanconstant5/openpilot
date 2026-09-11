@@ -4,7 +4,8 @@ from opendbc.car.toyota.carcontroller import CarController
 from opendbc.car.toyota.radar_interface import RadarInterface
 from opendbc.car.toyota.values import Ecu, CAR, DBC, ToyotaFlags, CarControllerParams, TSS2_CAR, RADAR_ACC_CAR, NO_DSU_CAR, \
                                                   MIN_ACC_SPEED, EPS_SCALE, NO_STOP_TIMER_CAR, ANGLE_CONTROL_CAR, \
-                                                  ToyotaSafetyFlags, LEGACY_PRIUS_CAR, TOYOTA_AUTO_HOLD_CARS
+                                                  ToyotaSafetyFlags, LEGACY_PRIUS_CAR, TOYOTA_AUTO_HOLD_CARS, \
+                                                  TSS3_LONG_MODE, TSS3LongMode, TSS3_LAT_MODE, TSS3LatMode
 from opendbc.car.disable_ecu import disable_ecu
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
@@ -207,6 +208,28 @@ class CarInterface(CarInterfaceBase):
       # Pedal/SDSU Toyotas feel best with a softer final stop clamp.
       ret.longitudinalActuatorDelay = max(ret.longitudinalActuatorDelay, 0.2)
       ret.stopAccel = -1.5
+
+    if candidate == CAR.TOYOTA_COROLLA_TSS3:
+      # 0x160 is keyless E2E. The target EPS patch handles the protected
+      # downstream steering path, so no openpilot SecOC key is requested.
+      ret.secOcRequired = False
+      ret.dashcamOnly = False
+      ret.radarUnavailable = True
+      ret.alphaLongitudinalAvailable = True
+      ret.openpilotLongitudinalControl = TSS3_LONG_MODE != TSS3LongMode.OFF
+      ret.autoResumeSng = False
+      ret.minEnableSpeed = MIN_ACC_SPEED
+      ret.steerControlType = SteerControlType.angle
+      ret.lateralTuning.init('pid')
+
+      tx_enabled = (TSS3_LONG_MODE == TSS3LongMode.LIVE and
+                    TSS3_LAT_MODE in (TSS3LatMode.OFF, TSS3LatMode.SHADOW, TSS3LatMode.LIVE))
+      if tx_enabled:
+        cfg = get_safety_config(structs.CarParams.SafetyModel.toyota)
+        cfg.safetyParam = EPS_SCALE[candidate] | ToyotaSafetyFlags.TSS3.value
+        ret.safetyConfigs = [cfg]
+      else:
+        ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.noOutput)]
 
     return ret
 

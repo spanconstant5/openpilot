@@ -48,6 +48,9 @@
   {0x343, 0, 8, .check_relay = true}, \
   {0x183, 0, 8, .check_relay = true},  /* ACC_CONTROL_2 */ \
 
+#define TOYOTA_TSS3_TX_MSGS \
+  {0x160, 0, 32, .check_relay = true, .disable_static_blocking = true}, \
+
 #define TOYOTA_COMMON_RX_CHECKS(lta)                                                                                                       \
   {.msg = {{ 0xaa, 0, 8, 83U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
   {.msg = {{0x260, 0, 8, 50U, .ignore_counter = true, .ignore_quality_flag=!(lta)}, { 0 }, { 0 }}},                           \
@@ -88,7 +91,16 @@
 #define TOYOTA_GAS_INTERCEPTOR_ADDR_CHECK                                                                                                  \
   {.msg = {{0x201, 0, 6, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
 
+#define TOYOTA_TSS3_RX_CHECKS \
+  {.msg = {{0xAA, 1, 8, 80U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
+  {.msg = {{0x8A, 1, 32, 40U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
+  {.msg = {{0x101, 1, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
+  {.msg = {{0x116, 1, 8, 42U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
+
 static bool toyota_secoc = false;
+static bool toyota_tss3 = false;
+static int tss3_last_steer_angle = 0;
+static bool tss3_steer_angle_inited = false;
 static bool toyota_alt_brake = false;
 static bool toyota_stock_longitudinal = false;
 static bool toyota_lta = false;
@@ -220,6 +232,31 @@ static void toyota_rx_hook(const CANPacket_t *msg) {
       gas_interceptor_prev = gas_interceptor;
     }
   }
+
+  if (toyota_tss3 && (msg->bus == 1U)) {
+    if (msg->addr == 0x8AU) {
+      pcm_cruise_check(GET_BIT(msg, 180U));
+      acc_main_on = msg->data[7] != 0U;
+    }
+    if (msg->addr == 0xAAU) {
+      int speed = 0;
+      for (uint8_t i = 0U; i < 8U; i += 2U) {
+        int wheel_speed = ((msg->data[i] & 0x7FU) << 8U) | msg->data[i + 1U];
+        speed += wheel_speed - 6767;
+      }
+      vehicle_moving = speed != 0;
+      UPDATE_VEHICLE_SPEED(speed / 4.0 * 0.01 * KPH_TO_MS);
+      if (!controls_allowed) {
+        tss3_steer_angle_inited = false;
+      }
+    }
+    if (msg->addr == 0x101U) {
+      brake_pressed = GET_BIT(msg, 3U);
+    }
+    if (msg->addr == 0x116U) {
+      gas_pressed = msg->data[1] != 0U;
+    }
+  }
 }
 
 static bool toyota_tx_hook(const CANPacket_t *msg) {
@@ -262,6 +299,11 @@ static bool toyota_tx_hook(const CANPacket_t *msg) {
     .max_accel = 2000,   // 2.0 m/s2
     .min_accel = -3500,  // -3.5 m/s2
   };
+  const LongitudinalLimits TOYOTA_TSS3_LONG_LIMITS = {
+    .max_accel = 2000,
+    .min_accel = -3500,
+  };
+  const int TOYOTA_TSS3_MAX_STEER_DELTA = 1500;
 
   bool tx = true;
 
@@ -300,6 +342,25 @@ static bool toyota_tx_hook(const CANPacket_t *msg) {
       desired_accel = to_signed(desired_accel, 16);
 
       tx = !longitudinal_accel_checks(desired_accel, TOYOTA_LONG_LIMITS);
+    }
+
+    if (toyota_tss3 && (msg->addr == 0x160U)) {
+      int desired_accel = ((msg->data[4] & 0x7FU) << 8U) | msg->data[5];
+      desired_accel = to_signed(desired_accel, 15);
+      bool violation = longitudinal_accel_checks(desired_accel, TOYOTA_TSS3_LONG_LIMITS);
+
+      int desired_steer = (msg->data[22] << 8U) | msg->data[23];
+      desired_steer = to_signed(desired_steer, 16);
+      if (controls_allowed) {
+        if (tss3_steer_angle_inited && (SAFETY_ABS(desired_steer - tss3_last_steer_angle) > TOYOTA_TSS3_MAX_STEER_DELTA)) {
+          violation = true;
+        }
+        if (!violation) {
+          tss3_steer_angle_inited = true;
+          tss3_last_steer_angle = desired_steer;
+        }
+      }
+      tx = !violation;
     }
 
     // AEB: block all actuation. only used when DSU is unplugged
@@ -450,6 +511,9 @@ static safety_config toyota_init(uint16_t param) {
   static const CanMsg TOYOTA_SECOC_LONG_TX_MSGS[] = {
     TOYOTA_COMMON_SECOC_LONG_TX_MSGS
   };
+  static const CanMsg TOYOTA_TSS3_TX_MSGS_ARR[] = {
+    TOYOTA_TSS3_TX_MSGS
+  };
 
   // safety param flags
   // first byte is for EPS factor, second is for flags
@@ -461,6 +525,7 @@ static safety_config toyota_init(uint16_t param) {
   const uint32_t TOYOTA_PARAM_LONG_FILTER = 16UL << TOYOTA_PARAM_OFFSET;
   const uint32_t TOYOTA_PARAM_GAS_INTERCEPTOR = 32UL << TOYOTA_PARAM_OFFSET;
   const uint32_t TOYOTA_PARAM_ALT_CRUISE = 64UL << TOYOTA_PARAM_OFFSET;
+  const uint32_t TOYOTA_PARAM_TSS3 = 128UL << TOYOTA_PARAM_OFFSET;
 
 #ifdef ALLOW_DEBUG
   const uint32_t TOYOTA_PARAM_SECOC = 8UL << TOYOTA_PARAM_OFFSET;
@@ -473,6 +538,9 @@ static safety_config toyota_init(uint16_t param) {
   toyota_long_filter = GET_FLAG(param, TOYOTA_PARAM_LONG_FILTER);
   enable_gas_interceptor = GET_FLAG(param, TOYOTA_PARAM_GAS_INTERCEPTOR);
   toyota_alt_cruise = GET_FLAG(param, TOYOTA_PARAM_ALT_CRUISE);
+#ifdef ALLOW_DEBUG
+  toyota_tss3 = GET_FLAG(param, TOYOTA_PARAM_TSS3);
+#endif
   toyota_dbc_eps_torque_factor = param & TOYOTA_EPS_FACTOR;
 
   if (toyota_stock_longitudinal || toyota_secoc) {
@@ -480,7 +548,9 @@ static safety_config toyota_init(uint16_t param) {
   }
 
   safety_config ret;
-  if (toyota_secoc) {
+  if (toyota_tss3) {
+    SET_TX_MSGS(TOYOTA_TSS3_TX_MSGS_ARR, ret);
+  } else if (toyota_secoc) {
     if (toyota_stock_longitudinal) {
       SET_TX_MSGS(TOYOTA_SECOC_TX_MSGS, ret);
     } else {
@@ -504,7 +574,12 @@ static safety_config toyota_init(uint16_t param) {
     }
   }
 
-  if (toyota_secoc) {
+  if (toyota_tss3) {
+    static RxCheck toyota_tss3_rx_checks[] = {
+      TOYOTA_TSS3_RX_CHECKS
+    };
+    SET_RX_CHECKS(toyota_tss3_rx_checks, ret);
+  } else if (toyota_secoc) {
     static RxCheck toyota_secoc_rx_checks[] = {
       TOYOTA_SECOC_RX_CHECKS
     };
@@ -568,9 +643,12 @@ static safety_config toyota_init(uint16_t param) {
 
 static bool toyota_fwd_hook(int bus_num, int addr) {
   bool block_msg = false;
+  if (toyota_tss3 && (bus_num == 2) && (addr == 0x160)) {
+    block_msg = get_longitudinal_allowed();
+  }
   if (bus_num == 2) {
-    block_msg = (addr == 0x344) && ((alternative_experience & ALT_EXP_ALLOW_AEB) != 0) &&
-                !vehicle_moving && !gas_pressed && acc_main_on;
+    block_msg |= (addr == 0x344) && ((alternative_experience & ALT_EXP_ALLOW_AEB) != 0) &&
+                 !vehicle_moving && !gas_pressed && acc_main_on;
   }
   return block_msg;
 }

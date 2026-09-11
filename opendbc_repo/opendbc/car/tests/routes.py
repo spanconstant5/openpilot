@@ -21,6 +21,7 @@ from opendbc.car.psa.values import CAR as PSA
 # FIXME: add routes for these cars
 non_tested_cars = [
   MOCK.MOCK,
+  TOYOTA.TOYOTA_COROLLA_TSS3,
   GM.CADILLAC_ATS,
   GM.CADILLAC_ESCALADE_ASCM,
   GM.CADILLAC_ESCALADE_ESV_2019_ASCM,

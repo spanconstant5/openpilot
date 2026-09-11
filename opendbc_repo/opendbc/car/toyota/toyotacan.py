@@ -1,4 +1,6 @@
 from opendbc.car.structs import CarParams
+from opendbc.car.can_definitions import CanData
+from opendbc.car.toyota.e2e import apply_e2e_160
 
 SteerControlType = CarParams.SteerControlType
 
@@ -199,3 +201,28 @@ def toyota_checksum(address: int, sig, d: bytearray) -> int:
   for i in range(len(d) - 1):
     s += d[i]
   return s & 0xFF
+
+
+TSS3_ADAS_ACC_REQUEST = 0x160
+TSS3_ACCEL_SCALE = 0.001
+TSS3_STEER_160_SCALE = 537.7
+
+
+def modify_tss3_160(template: bytes, accel: float | None, angle: float | None, counter: int) -> CanData:
+  """Modify the camera's combined TSS3 request while preserving all unknown fields."""
+  if len(template) != 32:
+    raise ValueError(f"0x160 template must be 32 bytes, got {len(template)}")
+
+  buf = bytearray(template)
+  if accel is not None:
+    raw_accel = max(-16384, min(16383, round(accel / TSS3_ACCEL_SCALE))) & 0x7FFF
+    buf[4] = (buf[4] & 0x80) | ((raw_accel >> 8) & 0x7F)
+    buf[5] = raw_accel & 0xFF
+
+  if angle is not None:
+    raw_angle = max(-32768, min(32767, round(angle * TSS3_STEER_160_SCALE))) & 0xFFFF
+    buf[22] = (raw_angle >> 8) & 0xFF
+    buf[23] = raw_angle & 0xFF
+
+  buf[2] = counter & 0xFF
+  return CanData(TSS3_ADAS_ACC_REQUEST, apply_e2e_160(bytes(buf)), 0)

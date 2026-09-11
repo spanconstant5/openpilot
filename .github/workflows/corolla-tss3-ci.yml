@@ -1,0 +1,29 @@
+name: Corolla TSS3 checks
+
+on:
+  push:
+    branches: [starpilot-corolla-2025-tss3]
+  workflow_dispatch:
+
+jobs:
+  focused-tests:
+    runs-on: ubuntu-24.04
+    env:
+      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/opendbc_repo
+      ALLOW_DEBUG: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install focused test dependencies
+        run: python -m pip install cffi numpy pycapnp==2.1.0 pytest scons
+      - name: Compile Python port
+        run: python -m compileall -q opendbc_repo/opendbc/car/toyota
+      - name: Build Panda safety test library
+        working-directory: opendbc_repo/opendbc/safety/tests
+        run: scons -D -j2
+      - name: Run Corolla request tests
+        run: pytest -q opendbc_repo/opendbc/car/toyota/tests/test_tss3.py
+      - name: Run Corolla Panda safety tests
+        run: pytest -q opendbc_repo/opendbc/safety/tests/test_toyota_tss3.py

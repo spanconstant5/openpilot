@@ -59,6 +59,9 @@ class ToyotaSafetyFlags(IntFlag):
   LONG_FILTER = (16 << 8)
   GAS_INTERCEPTOR = (32 << 8)
   ALT_CRUISE = (64 << 8)
+  # TSS 3.0 Corolla CAN FD receive/tx set. Kept separate from the generic
+  # SECOC and LTA flags because this platform's command is the 32-byte 0x160.
+  TSS3 = (128 << 8)
 
 
 class ToyotaFlags(IntFlag):
@@ -80,6 +83,8 @@ class ToyotaFlags(IntFlag):
   RAISED_ACCEL_LIMIT = 1024
   SECOC = 2048
   AUTO_BRAKE_HOLD = 4096
+  # Toyota TSS 3.0 CAN FD layout. 8192 is already DSU_BYPASS.
+  CAN_FD = 16384
 
   # deprecated flags
   # these cars are speculated to allow stop and go when the DSU is unplugged
@@ -134,6 +139,16 @@ class ToyotaSecOCPlatformConfig(PlatformConfig):
 
     if self.flags & ToyotaFlags.RADAR_ACC:
       self.dbc_dict = {Bus.pt: 'toyota_secoc_pt_generated'}
+
+
+@dataclass
+class ToyotaCanFDSecOCPlatformConfig(PlatformConfig):
+  """TSS 3.0 CAN FD platform with a dedicated 32-byte powertrain DBC."""
+  dbc_dict: dict = field(default_factory=lambda: {Bus.pt: 'toyota_corolla_tss3_pt'})
+
+  def init(self):
+    self.flags |= (ToyotaFlags.HYBRID | ToyotaFlags.TSS2 | ToyotaFlags.NO_DSU |
+                   ToyotaFlags.SECOC | ToyotaFlags.CAN_FD | ToyotaFlags.ANGLE_CONTROL)
 
 
 class CAR(Platforms):
@@ -223,6 +238,12 @@ class CAR(Platforms):
       ToyotaCarDocs("Toyota Corolla Cross Hybrid (Non-US only) 2020-22", min_enable_speed=7.5),
       ToyotaCarDocs("Lexus UX Hybrid 2019-24"),
     ],
+    CarSpecs(mass=3060. * CV.LB_TO_KG, wheelbase=2.67, steerRatio=13.9, tireStiffnessFactor=0.444),
+  )
+  TOYOTA_COROLLA_TSS3 = ToyotaCanFDSecOCPlatformConfig(
+    [ToyotaCommunityCarDocs("Toyota Corolla Hybrid 2025 (TSS 3.0)", min_enable_speed=MIN_ACC_SPEED)],
+    # The control geometry is inherited from the validated 2023 E210 port.
+    # Target-specific mass and steering calibration remain unresolved.
     CarSpecs(mass=3060. * CV.LB_TO_KG, wheelbase=2.67, steerRatio=13.9, tireStiffnessFactor=0.444),
   )
   TOYOTA_HIGHLANDER = PlatformConfig(
@@ -631,5 +652,27 @@ TOYOTA_AUTO_HOLD_CARS = (TSS2_CAR - RADAR_ACC_CAR - SECOC_CAR) | {
 
 # no resume button press required
 NO_STOP_TIMER_CAR = CAR.with_flags(ToyotaFlags.NO_STOP_TIMER)
+
+
+class TSS3LongMode:
+  OFF = 0
+  SHADOW = 1
+  LIVE = 2
+
+
+class TSS3LatMode:
+  OFF = 0
+  SHADOW = 1
+  LIVE = 2
+
+
+# These modes are evaluated only for the explicitly selected TSS3 platform.
+# The panda TSS3 safety flag supplies the independent tx/rx allowlist gate.
+TSS3_LONG_MODE = TSS3LongMode.LIVE
+TSS3_LAT_MODE = TSS3LatMode.LIVE
+TSS3_LAT_RELAY_ONLY = False
+TSS3_MAX_STEER_ANGLE = 55.0
+TSS3_MIN_OVERRIDE_SPEED = 0.45
+TSS3_PT_BUS = 1
 
 DBC = CAR.create_dbc_map()
