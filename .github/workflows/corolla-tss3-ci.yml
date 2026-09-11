@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install focused test dependencies
-        run: python -m pip install cffi numpy pycapnp==2.1.0 pytest scons
+        run: python -m pip install cffi numpy pycapnp==2.1.0 pytest pytest-xdist scons
       - name: Compile Python port
         run: python -m compileall -q opendbc_repo/opendbc/car/toyota
       - name: Build Panda safety test library
