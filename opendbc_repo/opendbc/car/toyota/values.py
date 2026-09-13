@@ -56,20 +56,16 @@ class ToyotaSafetyFlags(IntFlag):
   STOCK_LONGITUDINAL = (2 << 8)
   LTA = (4 << 8)
   SECOC = (8 << 8)
-  LONG_FILTER = (16 << 8)
-  GAS_INTERCEPTOR = (32 << 8)
-  ALT_CRUISE = (64 << 8)
-  # TSS 3.0 Corolla CAN FD receive/tx set. Kept separate from the generic
-  # SECOC and LTA flags because this platform's command is the 32-byte 0x160.
-  TSS3 = (128 << 8)
+  # TSS 3.0. Selects the CAN FD longitudinal-only tx/rx set in the panda safety
+  # mode. Requires the matching change in opendbc/safety/modes/toyota.h plus a
+  # firmware reflash -- see port/PANDA_TSS3_SAFETY.md. Ignored by stock firmware.
+  TSS3 = (16 << 8)
 
 
 class ToyotaFlags(IntFlag):
   # Detected flags
   HYBRID = 1
   DISABLE_RADAR = 4
-  # The DSU's ACC messages are rerouted through the camera bus by an adapter.
-  DSU_BYPASS = 8192
 
   # Static flags
   TSS2 = 8
@@ -82,19 +78,12 @@ class ToyotaFlags(IntFlag):
   # these cars can utilize 2.0 m/s^2
   RAISED_ACCEL_LIMIT = 1024
   SECOC = 2048
-  AUTO_BRAKE_HOLD = 4096
-  # Toyota TSS 3.0 CAN FD layout. 8192 is already DSU_BYPASS.
-  CAN_FD = 16384
+  # CAN FD powertrain bus (TSS 3.0). New for Toyota -- no other Toyota is CAN FD.
+  CAN_FD = 4096
 
   # deprecated flags
-  # these cars are speculated to allow stop and go when the DSU is unplugged
+  # these cars are speculated to allow stop and go when the DSU is unplugged or disabled with sDSU
   SNG_WITHOUT_DSU_DEPRECATED = 512
-
-
-class ToyotaStarPilotFlags(IntFlag):
-  RADAR_CAN_FILTER = 1
-  SMART_DSU = 2
-  ZSS = 4
 
 
 def dbc_dict(pt, radar):
@@ -114,9 +103,9 @@ class ToyotaCarDocs(CarDocs):
 
 
 @dataclass
-class ToyotaCommunityCarDocs(ToyotaCarDocs):
-  support_type: SupportType = SupportType.COMMUNITY
-  support_link: str = "#community"
+class ToyotaSecOcCarDocs(ToyotaCarDocs):
+  support_type: SupportType = SupportType.CUSTOM
+  support_link: str = "#secoc-cars-with-recoverable-keys"
 
 
 @dataclass
@@ -143,12 +132,12 @@ class ToyotaSecOCPlatformConfig(PlatformConfig):
 
 @dataclass
 class ToyotaCanFDSecOCPlatformConfig(PlatformConfig):
-  """TSS 3.0 CAN FD platform with a dedicated 32-byte powertrain DBC."""
+  """TSS 3.0: CAN FD + SecOC. Not a variant of ToyotaSecOCPlatformConfig -- that
+  one loads an 8-byte DBC and a radar bus, neither of which applies here."""
   dbc_dict: dict = field(default_factory=lambda: {Bus.pt: 'toyota_corolla_tss3_pt'})
 
   def init(self):
-    self.flags |= (ToyotaFlags.HYBRID | ToyotaFlags.TSS2 | ToyotaFlags.NO_DSU |
-                   ToyotaFlags.SECOC | ToyotaFlags.CAN_FD | ToyotaFlags.ANGLE_CONTROL)
+    self.flags |= ToyotaFlags.TSS2 | ToyotaFlags.NO_DSU | ToyotaFlags.SECOC | ToyotaFlags.CAN_FD
 
 
 class CAR(Platforms):
@@ -189,7 +178,7 @@ class CAR(Platforms):
       ToyotaCarDocs("Toyota Camry Hybrid 2018-20", video="https://www.youtube.com/watch?v=Q2DYY0AWKgk"),
     ],
     CarSpecs(mass=3400. * CV.LB_TO_KG, wheelbase=2.82448, steerRatio=13.7, tireStiffnessFactor=0.7933),
-    dbc_dict('toyota_nodsu_pt_generated', 'toyota_radar_dsu_tssp'),
+    dbc_dict('toyota_nodsu_pt_generated', 'toyota_adas'),
     flags=ToyotaFlags.NO_DSU,
   )
   TOYOTA_CAMRY_TSS2 = ToyotaTSS2PlatformConfig( # TSS 2.5
@@ -221,11 +210,6 @@ class CAR(Platforms):
     CarSpecs(mass=2860. * CV.LB_TO_KG, wheelbase=2.7, steerRatio=18.27, tireStiffnessFactor=0.444),
     dbc_dict('toyota_new_mc_pt_generated', 'toyota_adas'),
   )
-  TOYOTA_MATRIX_RETROFIT = PlatformConfig(
-    [ToyotaCommunityCarDocs("Toyota Matrix Retrofit 2005", package="Custom retrofit")],
-    TOYOTA_COROLLA.specs,
-    dbc_dict('toyota_new_mc_pt_generated', 'toyota_adas'),
-  )
   # LSS2 Lexus UX Hybrid is same as a TSS2 Corolla Hybrid
   TOYOTA_COROLLA_TSS2 = ToyotaTSS2PlatformConfig(
     [
@@ -241,9 +225,22 @@ class CAR(Platforms):
     CarSpecs(mass=3060. * CV.LB_TO_KG, wheelbase=2.67, steerRatio=13.9, tireStiffnessFactor=0.444),
   )
   TOYOTA_COROLLA_TSS3 = ToyotaCanFDSecOCPlatformConfig(
-    [ToyotaCommunityCarDocs("Toyota Corolla Hybrid 2025 (TSS 3.0)", min_enable_speed=MIN_ACC_SPEED)],
-    # The control geometry is inherited from the validated 2023 E210 port.
-    # Target-specific mass and steering calibration remain unresolved.
+    [ToyotaSecOcCarDocs("Toyota Corolla 2023", min_enable_speed=MIN_ACC_SPEED)],
+    # Same specs opendbc already uses for the E210 Corolla (TOYOTA_COROLLA_TSS2),
+    # which is the vetted middle ground between the 2.70 m sedan and the 2.64 m
+    # hatchback. The VIN (WMI 5YF = Toyota Motor Manufacturing Mississippi)
+    # indicates the US-built sedan.
+    #
+    # WHEELBASE AND THE DBC STEER_ANGLE FACTOR ARE COUPLED. The passive-log fit
+    # pinned only scale/steerRatio = 0.061 deg/count AT L = 2.64 m. Since
+    # delta = yaw * L / v, the inferred scale moves with the wheelbase:
+    #     L = 2.64 -> 0.0610/ratio -> 0.848 deg/count at steerRatio 13.9
+    #     L = 2.67 -> 0.0617/ratio -> 0.858 deg/count   <- used, see the DBC
+    #     L = 2.70 -> 0.0624/ratio -> 0.867 deg/count
+    # Change wheelbase or steerRatio here and you must rescale STEER_ANGLE in
+    # toyota_corolla_tss3_pt.dbc to match, or the angle reads wrong while still
+    # correlating perfectly with curvature. Settle it on the car instead: hold a
+    # known wheel angle and read the decoded value.
     CarSpecs(mass=3060. * CV.LB_TO_KG, wheelbase=2.67, steerRatio=13.9, tireStiffnessFactor=0.444),
   )
   TOYOTA_HIGHLANDER = PlatformConfig(
@@ -269,11 +266,6 @@ class CAR(Platforms):
       ToyotaCarDocs("Toyota Prius Prime 2017-20", video="https://www.youtube.com/watch?v=8zopPJI8XQ0"),
     ],
     CarSpecs(mass=3045. * CV.LB_TO_KG, wheelbase=2.7, steerRatio=15.74, tireStiffnessFactor=0.6371),
-    dbc_dict('toyota_nodsu_pt_generated', 'toyota_adas'),
-  )
-  TOYOTA_PRIUS_RETROFIT = PlatformConfig(
-    [ToyotaCommunityCarDocs("Toyota Prius 2016-20 with TSS2 EPS retrofit", package="Custom retrofit")],
-    TOYOTA_PRIUS.specs,
     dbc_dict('toyota_nodsu_pt_generated', 'toyota_adas'),
   )
   TOYOTA_PRIUS_V = PlatformConfig(
@@ -331,11 +323,11 @@ class CAR(Platforms):
     flags=ToyotaFlags.RADAR_ACC | ToyotaFlags.ANGLE_CONTROL,
   )
   TOYOTA_RAV4_PRIME = ToyotaSecOCPlatformConfig(
-    [ToyotaCommunityCarDocs("Toyota RAV4 Prime 2021-23", min_enable_speed=MIN_ACC_SPEED)],
+    [ToyotaSecOcCarDocs("Toyota RAV4 Prime 2021-23", min_enable_speed=MIN_ACC_SPEED)],
     CarSpecs(mass=4372. * CV.LB_TO_KG, wheelbase=2.68, steerRatio=16.88, tireStiffnessFactor=0.5533),
   )
   TOYOTA_YARIS = ToyotaSecOCPlatformConfig(
-    [ToyotaCommunityCarDocs("Toyota Yaris (Non-US only) 2020, 2023", min_enable_speed=MIN_ACC_SPEED)],
+    [ToyotaSecOcCarDocs("Toyota Yaris (Non-US only) 2020, 2023", min_enable_speed=MIN_ACC_SPEED)],
     CarSpecs(mass=1170, wheelbase=2.55, steerRatio=14.80, tireStiffnessFactor=0.5533),
     flags=ToyotaFlags.RADAR_ACC,
   )
@@ -350,7 +342,7 @@ class CAR(Platforms):
     flags=ToyotaFlags.NO_STOP_TIMER,
   )
   TOYOTA_SIENNA_4TH_GEN = ToyotaSecOCPlatformConfig(
-    [ToyotaCommunityCarDocs("Toyota Sienna 2021-25", min_enable_speed=MIN_ACC_SPEED)],
+    [ToyotaSecOcCarDocs("Toyota Sienna 2021-23", min_enable_speed=MIN_ACC_SPEED)],
     CarSpecs(mass=4625. * CV.LB_TO_KG, wheelbase=3.06, steerRatio=17.8, tireStiffnessFactor=0.444),
   )
 
@@ -439,6 +431,11 @@ class CAR(Platforms):
     CarSpecs(mass=4034. * CV.LB_TO_KG, wheelbase=2.84988, steerRatio=13.3, tireStiffnessFactor=0.444),
     dbc_dict('toyota_new_mc_pt_generated', 'toyota_adas'),
     flags=ToyotaFlags.UNSUPPORTED_DSU,
+  )
+  LEXUS_LS = PlatformConfig(
+    [ToyotaCarDocs("Lexus LS 2018", "All except Lexus Safety System+ A")],
+    CarSpecs(mass=4905. * CV.LB_TO_KG, wheelbase=3.125, steerRatio=15.0, tireStiffnessFactor=0.444),
+    dbc_dict('toyota_nodsu_pt_generated', 'toyota_adas'),
   )
 
 
@@ -560,6 +557,7 @@ TOYOTA_VERSION_REQUEST_KWP = b'\x1a\x88\x01'
 TOYOTA_VERSION_RESPONSE_KWP = b'\x5a\x88\x01'
 
 FW_QUERY_CONFIG = FwQueryConfig(
+  fw_version_regex=br"[\x00-\x03A-Z0-9 ]{16,49}",
   # TODO: look at data to whitelist new ECUs effectively
   requests=[
     Request(
@@ -584,7 +582,7 @@ FW_QUERY_CONFIG = FwQueryConfig(
   ],
   non_essential_ecus={
     # FIXME: On some models, abs can sometimes be missing
-    Ecu.abs: [CAR.TOYOTA_RAV4, CAR.TOYOTA_COROLLA, CAR.TOYOTA_MATRIX_RETROFIT, CAR.TOYOTA_HIGHLANDER, CAR.TOYOTA_SIENNA, CAR.LEXUS_IS, CAR.TOYOTA_ALPHARD_TSS2],
+    Ecu.abs: [CAR.TOYOTA_RAV4, CAR.TOYOTA_COROLLA, CAR.TOYOTA_HIGHLANDER, CAR.TOYOTA_SIENNA, CAR.LEXUS_IS, CAR.TOYOTA_ALPHARD_TSS2],
     # On some models, the engine can show on two different addresses
     Ecu.engine: [CAR.TOYOTA_HIGHLANDER, CAR.TOYOTA_CAMRY, CAR.TOYOTA_COROLLA_TSS2, CAR.TOYOTA_CHR, CAR.TOYOTA_CHR_TSS2, CAR.LEXUS_IS,
                  CAR.LEXUS_IS_TSS2, CAR.LEXUS_RC, CAR.LEXUS_NX, CAR.LEXUS_NX_TSS2, CAR.LEXUS_RX, CAR.LEXUS_RX_TSS2],
@@ -625,14 +623,12 @@ STEER_THRESHOLD = 100
 
 # These cars have non-standard EPS torque scale factors. All others are 73
 EPS_SCALE = defaultdict(lambda: 73,
-                        {CAR.TOYOTA_PRIUS: 66, CAR.TOYOTA_PRIUS_RETROFIT: 73, CAR.TOYOTA_COROLLA: 88, CAR.TOYOTA_MATRIX_RETROFIT: 88,
-                         CAR.LEXUS_IS: 77, CAR.LEXUS_RC: 77, CAR.LEXUS_CTH: 100, CAR.TOYOTA_PRIUS_V: 100})
-
-LEGACY_PRIUS_CAR = frozenset((CAR.TOYOTA_PRIUS, CAR.TOYOTA_PRIUS_RETROFIT))
+                        {CAR.TOYOTA_PRIUS: 66, CAR.TOYOTA_COROLLA: 88, CAR.LEXUS_IS: 77, CAR.LEXUS_RC: 77, CAR.LEXUS_CTH: 100, CAR.TOYOTA_PRIUS_V: 100})
 
 # Toyota/Lexus Safety Sense 2.0 and 2.5
 TSS2_CAR = CAR.with_flags(ToyotaFlags.TSS2)
 
+# removed upstream as unused, but sunnypilot's DSU-removed radar support in interface.py still needs it
 NO_DSU_CAR = CAR.with_flags(ToyotaFlags.NO_DSU)
 
 # the DSU uses the AEB message for longitudinal on these cars
@@ -645,34 +641,96 @@ ANGLE_CONTROL_CAR = CAR.with_flags(ToyotaFlags.ANGLE_CONTROL)
 
 SECOC_CAR = CAR.with_flags(ToyotaFlags.SECOC)
 
-TOYOTA_AUTO_HOLD_CARS = (TSS2_CAR - RADAR_ACC_CAR - SECOC_CAR) | {
-  CAR.TOYOTA_RAV4,
-  CAR.TOYOTA_RAV4H,
-}
-
 # no resume button press required
 NO_STOP_TIMER_CAR = CAR.with_flags(ToyotaFlags.NO_STOP_TIMER)
 
-
 class TSS3LongMode:
+  """How far the TSS 3.0 longitudinal path is switched on.
+
+  OFF     Phase 1. Read only. Safety model noOutput, panda transmits nothing,
+          openpilot does not even run a longitudinal plan. The model still runs
+          and renders lanes.
+
+  SHADOW  Port doc section 12.4. openpilot runs its longitudinal planner and its
+          intended accel is logged, but safety is still noOutput so NOTHING is
+          transmitted -- the stock ACC continues to drive the car. This is how
+          you validate 0x13C construction at zero risk: compare openpilot's
+          intended accel against the stock 0x13C.ACCEL_CMD in the same rlog.
+
+  LIVE    openpilot actually sends 0x13C. NOT READY -- two hard blockers:
+
+          1. Engagement/cancel. cruiseState.enabled is currently derived from
+             0x13C.LON_ACTIVE, i.e. from the STOCK system's own command. The
+             moment openpilot takes 0x13C over, that signal is openpilot's own
+             output and can no longer report whether the driver engaged or
+             cancelled. A separate cruise-button / ACC-state message must be
+             decoded first (port doc section 12.2 item 2). This is the real
+             reason that item is a safety blocker, not a nicety.
+
+          2. panda safety must permit 0x13C, and the relay must actually sit
+             between the stock 0x13C sender and the powertrain bus. 0x13C is
+             declared .check_relay = true, so if the stock sender keeps putting
+             it on the destination bus the panda raises relay_malfunction and
+             blocks ALL transmission. See port/PANDA_TSS3_SAFETY.md.
+  """
   OFF = 0
   SHADOW = 1
   LIVE = 2
+
+
+TSS3_LONG_MODE = TSS3LongMode.LIVE
 
 
 class TSS3LatMode:
+  """TSS 3.0 LATERAL (0x1A0 LTA steering command), mirrors TSS3LongMode.
+  OFF    no lateral tx. SHADOW  planner runs, safety noOutput, nothing tx'd
+  (compare openpilot's desired angle vs the gateway's 0x1A0 offline). LIVE
+  openpilot transmits 0x1A0 (angle control). Needs the matching panda tx entry."""
   OFF = 0
   SHADOW = 1
   LIVE = 2
 
 
-# These modes are evaluated only for the explicitly selected TSS3 platform.
-# The panda TSS3 safety flag supplies the independent tx/rx allowlist gate.
-TSS3_LONG_MODE = TSS3LongMode.LIVE
 TSS3_LAT_MODE = TSS3LatMode.LIVE
-TSS3_LAT_RELAY_ONLY = False
-TSS3_MAX_STEER_ANGLE = 55.0
-TSS3_MIN_OVERRIDE_SPEED = 0.45
+
+# 0x1A0 STEER_ANGLE_CMD is ~0.0148 deg/count. Observed LTA authority ~+/-17 deg.
+# openpilot's own command clamped to this; panda enforces its own angle/rate limit.
+TSS3_MAX_STEER_ANGLE = 55.0  # deg -- openpilot's OWN commanded angle clamp. Scale 537.7 confirmed 1:1 on-car (route 28, measured/desired median 1.01). b22:24 field saturates at +/-60.9 deg (== stock LTA authority); 55 keeps margin. Turns sharper than this are beyond LTA authority = driver's job, same as stock.
+
+# Lateral bring-up safety: when True, LAT LIVE EMITS 0x1A0 but RELAYS the gateway's
+# angle unchanged (openpilot never actually steers) -- use for the first LIVE test
+# to confirm the emit path is accepted with no dash fault. Set False to let
+# openpilot substitute its own target angle.
+TSS3_LAT_RELAY_ONLY = False  # NUDGE: openpilot substitutes b22:24 with its own (TSS3_MAX_STEER_ANGLE-clamped) angle
+
+# Which panda bus the TSS 3.0 POWERTRAIN CAN lands on.
+#
+# Measured 2026-09-09 on both wirings of the T21 camera connector (pins 9-16,
+# the only pins the comma harness intercepts):
+#
+#   stock  (pink/orange, blue/green as delivered)
+#     bus1  149 addrs incl. 0x13C  -> powertrain, NOT relayed
+#     bus0/2 22 addrs, CAN FD      -> ADAS/camera, relayed
+#
+#   swapped (pink<->orange, blue<->green on both connectors)
+#     bus0/2 149 addrs incl. 0x13C -> powertrain ON the relay
+#     bus1    22 addrs             -> ADAS/camera
+#
+# Stock is the correct wiring: the comma relay exists to cut ONE camera off the
+# end of a bus, not to bisect the vehicle powertrain bus. The swapped wiring put
+# the relay mid-powertrain, and opening it split that bus -- which is why bus 0
+# went bus-off ~10 s after the relay opened during the first LIVE attempt.
 TSS3_PT_BUS = 1
+
+# Below this speed openpilot hands longitudinal back to the stock system so
+# Toyota's own standstill-hold mechanism does the final stop and hold. openpilot
+# cannot signal the hold through 0x160 (the camera uses a separate path), so
+# overriding into a dead stop never reaches the stock 0x67 hold and the gateway
+# faults. ~3 mph.
+TSS3_MIN_OVERRIDE_SPEED = 0.45  # m/s (~1 mph). openpilot controls down to here;
+# below it, relay the camera's frame so TSS does ONLY the 0 mph standstill hold.
+# Safe to go this low: the stock ACC_ENGAGED signal (panda controls_allowed) stays
+# asserted to 0.0 mph during a lead-follow (verified route 18), so the panda
+# permits openpilot's 0x160 all the way down.
 
 DBC = CAR.create_dbc_map()
