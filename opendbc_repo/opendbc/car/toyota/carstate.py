@@ -1,14 +1,15 @@
 import copy
 
-from cereal import custom
 from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, DT_CTRL, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.common.filter_simple import FirstOrderFilter
 from opendbc.car.interfaces import CarStateBase
-from opendbc.car.toyota.values import ToyotaFlags, ToyotaStarPilotFlags, CAR, DBC, STEER_THRESHOLD, NO_STOP_TIMER_CAR, \
-                                                  TSS2_CAR, RADAR_ACC_CAR, EPS_SCALE, UNSUPPORTED_DSU_CAR, \
-                                                  SECOC_CAR, LEGACY_PRIUS_CAR, TSS3_PT_BUS
+from opendbc.car.toyota.values import ToyotaFlags, CAR, DBC, STEER_THRESHOLD, NO_STOP_TIMER_CAR, \
+                                                  TSS3_LONG_MODE, TSS3LongMode, TSS3_PT_BUS, \
+                                                  TSS2_CAR, EPS_SCALE
+from opendbc.sunnypilot.car.toyota.carstate_ext import CarStateExt
+from opendbc.sunnypilot.car.toyota.values import ToyotaFlagsSP
 
 ButtonType = structs.CarState.ButtonEvent.Type
 SteerControlType = structs.CarParams.SteerControlType
@@ -23,38 +24,12 @@ TEMP_STEER_FAULTS = (0, 9, 11, 21, 25)
 # - lka/lta msg drop out: 3 (recoverable)
 # - prolonged high driver torque: 17 (permanent)
 PERM_STEER_FAULTS = (3, 17)
-LKAS_BUTTON_CAR = TSS2_CAR | LEGACY_PRIUS_CAR
-DISTANCE_BUTTON_CAR = {CAR.TOYOTA_SIENNA_4TH_GEN}
 
 
-# Traffic signals for Speed Limit Controller - Credit goes to the DragonPilot team!
-def calculate_speed_limit(cp_cam):
-  speed_limit_unit = cp_cam.vl["RSA1"]["TSGN1"]
-  speed_limit_value = cp_cam.vl["RSA1"]["SPDVAL1"]
-
-  if speed_limit_unit == 1:
-    return speed_limit_value * CV.KPH_TO_MS
-  elif speed_limit_unit == 36:
-    return speed_limit_value * CV.MPH_TO_MS
-  else:
-    return 0
-
-
-def calculate_interceptor_gas_pressed(cp) -> bool:
-  interceptor_gas = (cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS"] + cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS2"]) / 2
-  return interceptor_gas > 805
-
-
-def create_lkas_button_events(lkas_button: int, prev_lkas_button: int) -> list[structs.CarState.ButtonEvent]:
-  if lkas_button != 0 and lkas_button != prev_lkas_button:
-    return (create_button_events(1, 0, {1: ButtonType.lkas}) +
-            create_button_events(0, 1, {1: ButtonType.lkas}))
-  return []
-
-
-class CarState(CarStateBase):
-  def __init__(self, CP, FPCP):
-    super().__init__(CP, FPCP)
+class CarState(CarStateBase, CarStateExt):
+  def __init__(self, CP, CP_SP):
+    CarStateBase.__init__(self, CP, CP_SP)
+    CarStateExt.__init__(self, CP, CP_SP)
     can_define = CANDefine(DBC[CP.carFingerprint][Bus.pt])
     self.eps_torque_scale = EPS_SCALE[CP.carFingerprint] / 100.
     self.cluster_speed_hyst_gap = CV.KPH_TO_MS / 2.
@@ -75,37 +50,35 @@ class CarState(CarStateBase):
     self.distance_button = 0
 
     self.pcm_follow_distance = 0
-    self.pcm_acc_status = 0
 
     self.acc_type = 1
     self.lkas_hud = {}
     self.gvc = 0.0
     self.secoc_synchronization = None
 
-    self.latActive_previous = False
-    self.needs_angle_offset_zss = False
-
-    self.angle_offset_zss = 0
-
-    self.has_can_filter = self.FPCP.flags & ToyotaStarPilotFlags.RADAR_CAN_FILTER.value
-    self.has_SDSU = self.FPCP.flags & ToyotaStarPilotFlags.SMART_DSU.value
-    self.has_ZSS = self.FPCP.flags & ToyotaStarPilotFlags.ZSS.value
-    self.auto_brake_hold = bool(self.CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD.value)
-    self.pre_collision_2 = {}
-
-    self.tss3_accel_template: bytes | None = None
+    # TSS 3.0 longitudinal (modify-and-forward). The camera's live 0x160
+    # frame, captured on the cam bus, is the template the carcontroller
+    # edits. tss3_camera_accel is what the camera itself requested (for
+    # shadow comparison); tss3_stock_lon_active gates override on the stock
+    # ACC actually controlling.
+    self.tss3_accel_template = None
     self.tss3_camera_accel = 0.0
+    self.tss3_stock_lon_active = False
 
-  def update(self, can_parsers, starpilot_toggles) -> structs.CarState:
+    # TSS 3.0 lateral: the gateway's live 0x1A0 LTA steering command, the
+    # template the carcontroller edits (angle field) for lateral control.
+    self.tss3_steer_template = None
+
+  def update(self, can_parsers) -> tuple[structs.CarState, structs.CarStateSP]:
     if self.CP.flags & ToyotaFlags.CAN_FD.value:
-      return self.update_tss3(can_parsers, starpilot_toggles)
+      return self.update_tss3(can_parsers)
 
     cp = can_parsers[Bus.pt]
     cp_cam = can_parsers[Bus.cam]
 
     ret = structs.CarState()
-    dsu_bypass = bool(self.CP.flags & ToyotaFlags.DSU_BYPASS.value)
-    cp_acc = cp_cam if self.CP.carFingerprint in (TSS2_CAR - RADAR_ACC_CAR) or dsu_bypass else cp
+    ret_sp = structs.CarStateSP()
+    cp_acc = cp_cam if (self.CP.flags & ToyotaFlags.TSS2) and not (self.CP.flags & ToyotaFlags.RADAR_ACC) else cp
 
     if not self.CP.flags & ToyotaFlags.SECOC.value:
       self.gvc = cp.vl["VSC1S07"]["GVC"]
@@ -123,10 +96,7 @@ class CarState(CarStateBase):
       ret.gasPressed = cp.vl["GAS_PEDAL"]["GAS_PEDAL_USER"] > 0
       can_gear = int(cp.vl["GEAR_PACKET_HYBRID"]["GEAR"])
     else:
-      if self.CP.enableGasInterceptorDEPRECATED:
-        ret.gasPressed = calculate_interceptor_gas_pressed(cp)
-      else:
-        ret.gasPressed = cp.vl["PCM_CRUISE"]["GAS_RELEASED"] == 0  # TODO: these also have GAS_PEDAL, come back and unify
+      ret.gasPressed = cp.vl["PCM_CRUISE"]["GAS_RELEASED"] == 0
       can_gear = int(cp.vl["GEAR_PACKET"]["GEAR"])
       if not self.CP.flags & ToyotaFlags.DISABLE_RADAR.value:
         ret.stockAeb = bool(cp_acc.vl["PRE_COLLISION"]["PRECOLLISION_ACTIVE"] and cp_acc.vl["PRE_COLLISION"]["FORCE"] < -1e-5)
@@ -137,9 +107,12 @@ class CarState(CarStateBase):
       cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_RL"],
       cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_RR"],
     )
-    ret.vEgoCluster = ret.vEgo * starpilot_toggles.cluster_offset
+    ret.vEgoCluster = ret.vEgo * 1.015  # minimum of all the cars
 
     ret.standstill = abs(ret.vEgoRaw) < 1e-3
+
+    ret.vehicleSensorsInvalid = any(cp.vl["WHEEL_SPEEDS"][f"WHEEL_SPEED_{whl}_FAULT"]
+                                    for whl in ("FL", "FR", "RL", "RR"))
 
     ret.steeringAngleDeg = cp.vl["STEER_ANGLE_SENSOR"]["STEER_ANGLE"] + cp.vl["STEER_ANGLE_SENSOR"]["STEER_FRACTION"]
     ret.steeringRateDeg = cp.vl["STEER_ANGLE_SENSOR"]["STEER_RATE"]
@@ -168,20 +141,19 @@ class CarState(CarStateBase):
     ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD
 
     # Check EPS LKA/LTA fault status
-    # A missing EPS_STATUS frame reads as zero in the parser. Do not turn that
-    # invalid startup sample into a real steering fault.
-    ret.steerFaultTemporary = cp.can_valid and cp.vl["EPS_STATUS"]["LKA_STATE"] in TEMP_STEER_FAULTS
-    ret.steerFaultPermanent = cp.can_valid and cp.vl["EPS_STATUS"]["LKA_STATE"] in PERM_STEER_FAULTS
+    ret.steerFaultTemporary = cp.vl["EPS_STATUS"]["LKA_STATE"] in TEMP_STEER_FAULTS
+    ret.steerFaultPermanent = cp.vl["EPS_STATUS"]["LKA_STATE"] in PERM_STEER_FAULTS
 
     if self.CP.steerControlType == SteerControlType.angle:
-      ret.steerFaultTemporary = cp.can_valid and (ret.steerFaultTemporary or cp.vl["EPS_STATUS"]["LTA_STATE"] in TEMP_STEER_FAULTS)
-      ret.steerFaultPermanent = cp.can_valid and (ret.steerFaultPermanent or cp.vl["EPS_STATUS"]["LTA_STATE"] in PERM_STEER_FAULTS)
+      ret.steerFaultTemporary = ret.steerFaultTemporary or cp.vl["EPS_STATUS"]["LTA_STATE"] in TEMP_STEER_FAULTS
+      ret.steerFaultPermanent = ret.steerFaultPermanent or cp.vl["EPS_STATUS"]["LTA_STATE"] in PERM_STEER_FAULTS
 
       # Lane Tracing Assist control is unavailable (EPS_STATUS->LTA_STATE=0) until
       # the more accurate angle sensor signal is initialized
-      ret.vehicleSensorsInvalid = not self.accurate_steer_angle_seen
+      if not self.accurate_steer_angle_seen:
+        ret.vehicleSensorsInvalid = True
 
-    if self.CP.carFingerprint in UNSUPPORTED_DSU_CAR:
+    if self.CP.flags & ToyotaFlags.UNSUPPORTED_DSU:
       # TODO: find the bit likely in DSU_CRUISE that describes an ACC fault. one may also exist in CLUTCH
       ret.cruiseState.available = cp.vl["DSU_CRUISE"]["MAIN_ON"] != 0
       ret.cruiseState.speed = cp.vl["DSU_CRUISE"]["SET_SPEED"] * CV.KPH_TO_MS
@@ -199,10 +171,8 @@ class CarState(CarStateBase):
       conversion_factor = CV.KPH_TO_MS if is_metric else CV.MPH_TO_MS
       ret.cruiseState.speedCluster = cluster_set_speed * conversion_factor
 
-    if dsu_bypass or (self.CP.carFingerprint in TSS2_CAR and not self.CP.flags & ToyotaFlags.DISABLE_RADAR.value):
-      # smartDSU can intercept ACC_CONTROL, so don't require it when it's no
-      # longer forwarded on the PT bus.
-      if not self.has_SDSU:
+    if self.CP.flags & ToyotaFlags.TSS2 and not self.CP.flags & ToyotaFlags.DISABLE_RADAR.value:
+      if not (self.CP_SP.flags & ToyotaFlagsSP.SMART_DSU.value):
         self.acc_type = cp_acc.vl["ACC_CONTROL"]["ACC_TYPE"]
       ret.stockFcw = bool(cp_acc.vl["PCS_HUD"]["FCW"])
 
@@ -210,12 +180,11 @@ class CarState(CarStateBase):
     # these cars are identified by an ACC_TYPE value of 2.
     # TODO: it is possible to avoid the lockout and gain stop and go if you
     # send your own ACC_CONTROL msg on startup with ACC_TYPE set to 1
-    if (self.CP.carFingerprint not in TSS2_CAR and self.CP.carFingerprint not in UNSUPPORTED_DSU_CAR) or \
-       (self.CP.carFingerprint in TSS2_CAR and self.acc_type == 1):
+    if (not (self.CP.flags & ToyotaFlags.TSS2) and not (self.CP.flags & ToyotaFlags.UNSUPPORTED_DSU)) or \
+       (self.CP.flags & ToyotaFlags.TSS2 and self.acc_type == 1):
       if self.CP.openpilotLongitudinalControl:
         ret.accFaulted = ret.accFaulted or cp.vl["PCM_CRUISE_2"]["LOW_SPEED_LOCKOUT"] == 2
 
-    prev_pcm_acc_status = self.pcm_acc_status
     self.pcm_acc_status = cp.vl["PCM_CRUISE"]["CRUISE_STATE"]
     if self.CP.carFingerprint not in (NO_STOP_TIMER_CAR - TSS2_CAR):
       # ignore standstill state in certain vehicles, since pcm allows to restart with just an acceleration request
@@ -233,108 +202,109 @@ class CarState(CarStateBase):
     if self.CP.carFingerprint != CAR.TOYOTA_PRIUS_V:
       self.lkas_hud = copy.copy(cp_cam.vl["LKAS_HUD"])
 
-    if self.auto_brake_hold:
-      self.pre_collision_2 = copy.copy(cp_cam.vl["PRE_COLLISION_2"])
-
-    if self.CP.carFingerprint not in UNSUPPORTED_DSU_CAR:
+    if not (self.CP.flags & ToyotaFlags.UNSUPPORTED_DSU):
       self.pcm_follow_distance = cp.vl["PCM_CRUISE_2"]["PCM_FOLLOW_DISTANCE"]
 
     buttonEvents = []
-    if self.CP.carFingerprint in LKAS_BUTTON_CAR:
+    prev_distance_button = self.distance_button
+    if self.CP.flags & ToyotaFlags.TSS2:
+      # lkas button is wired to the camera
       prev_lkas_button = self.lkas_button
       self.lkas_button = cp_cam.vl["LKAS_HUD"]["LDA_ON_MESSAGE"]
-      buttonEvents += create_lkas_button_events(self.lkas_button, prev_lkas_button)
 
-    if self.CP.carFingerprint in TSS2_CAR:
-      if self.CP.carFingerprint not in (RADAR_ACC_CAR | SECOC_CAR):
+      # Cycles between 1 and 2 when pressing the button, then rests back at 0 after ~3s
+      if self.lkas_button != 0 and self.lkas_button != prev_lkas_button:
+        buttonEvents.extend(create_button_events(1, 0, {1: ButtonType.lkas}) +
+                            create_button_events(0, 1, {1: ButtonType.lkas}))
+
+      if not (self.CP.flags & (ToyotaFlags.RADAR_ACC | ToyotaFlags.SECOC)):
         # distance button is wired to the ACC module (camera or radar)
-        prev_distance_button = self.distance_button
         self.distance_button = cp_acc.vl["ACC_CONTROL"]["DISTANCE"]
 
         buttonEvents += create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
-
-    if self.CP.carFingerprint in LEGACY_PRIUS_CAR and not self.has_SDSU:
-      prev_distance_button = self.distance_button
-      self.distance_button = cp_acc.vl["ACC_CONTROL"]["DISTANCE"]
-      buttonEvents += create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
-
-    if self.CP.carFingerprint in DISTANCE_BUTTON_CAR:
-      prev_distance_button = self.distance_button
-      self.distance_button = cp.vl["PCM_CRUISE_4"]["DISTANCE"]
-      buttonEvents += create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
-
-    fp_ret = custom.StarPilotCarState.new_message()
-
-    if self.has_SDSU and not self.has_can_filter:
-      prev_distance_button = self.distance_button
+    elif self.CP_SP.flags & ToyotaFlagsSP.SMART_DSU and not self.CP_SP.flags & ToyotaFlagsSP.RADAR_CAN_FILTER:
       self.distance_button = cp.vl["SDSU"]["FD_BUTTON"]
 
       buttonEvents += create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
 
-    buttonEvents += [
-      *create_button_events(self.pcm_acc_status == 9, prev_pcm_acc_status == 9, {1: ButtonType.accelCruise}),
-      *create_button_events(self.pcm_acc_status == 10, prev_pcm_acc_status == 10, {1: ButtonType.decelCruise}),
-    ]
-
-    fp_ret.dashboardSpeedLimit = calculate_speed_limit(cp_cam)
-
-    if not self.CP.flags & ToyotaFlags.SECOC.value:
-      fp_ret.ecoGear = cp.vl["GEAR_PACKET"]["ECON_ON"] == 1
-      fp_ret.sportGear = cp.vl["GEAR_PACKET"]["SPORT_ON_2" if self.CP.flags & ToyotaFlags.NO_DSU else "SPORT_ON"] == 1
-
-    # ZSS Support - Credit goes to Erich!
-    if self.has_ZSS:
-      if self.CC.latActive and not self.latActive_previous:
-        self.needs_angle_offset_zss = True
-      self.latActive_previous = self.CC.latActive
-
-      if self.needs_angle_offset_zss:
-        zorro_steer = cp.vl["SECONDARY_STEER_ANGLE"]["ZORRO_STEER"]
-        if abs(ret.steeringAngleDeg) > 1e-3 and abs(zorro_steer) > 1e-3:
-          self.needs_angle_offset_zss = False
-          self.angle_offset_zss = zorro_steer - ret.steeringAngleDeg
-      else:
-        zorro_steer_value = cp.vl["SECONDARY_STEER_ANGLE"]["ZORRO_STEER"] - self.angle_offset_zss
-        if abs(ret.steeringAngleDeg - zorro_steer_value) < 4.0:
-          ret.steeringAngleDeg = zorro_steer_value
-
     ret.buttonEvents = buttonEvents
 
-    return ret, fp_ret
+    CarStateExt.update(self, ret, ret_sp, can_parsers)
 
-  def update_tss3(self, can_parsers, starpilot_toggles):
-    """Decode the measured TSS 3.0 Corolla state and retain camera 0x160."""
+    return ret, ret_sp
+
+  def update_tss3(self, can_parsers) -> tuple[structs.CarState, structs.CarStateSP]:
+    """TSS 3.0 (CAN FD + SecOC) -- Phase 1, READ ONLY.
+
+    Every signal here is decoded from passive rlogs and has never been validated
+    on the car. cruiseState is hard-stubbed off so openpilot cannot believe it is
+    allowed to engage; there is no carcontroller path for this platform.
+    """
     cp = can_parsers[Bus.pt]
-    cp_cam = can_parsers[Bus.cam]
-    ret = structs.CarState()
-    fp_ret = custom.StarPilotCarState.new_message()
 
+    ret = structs.CarState()
+    ret_sp = structs.CarStateSP()
+
+    # parse_wheel_speeds sets vEgoRaw/vEgo/aEgo. It does not populate
+    # ret.wheelSpeeds.* -- nothing in the Toyota path does. Default unit is
+    # CV.KPH_TO_MS, which matches this DBC's km/h.
     self.parse_wheel_speeds(ret,
       cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_FL"],
       cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_FR"],
       cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_RL"],
       cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_RR"],
     )
-    ret.vEgoCluster = ret.vEgo * starpilot_toggles.cluster_offset
     ret.standstill = abs(ret.vEgoRaw) < 1e-3
+
+    # Positive = left (verified in logs). No STEER_FRACTION/STEER_RATE decoded,
+    # so the classic angle-offset cross-check does not apply here.
     ret.steeringAngleDeg = cp.vl["STEER_ANGLE_ACC_STATUS"]["STEER_ANGLE"]
-    ret.steeringRateDeg = 0.0
+    ret.steeringRateDeg = 0.
     ret.yawRate = cp.vl["KINEMATICS"]["YAW_RATE"]
 
-    # The four 0xDA torque fields have not been assigned to driver/EPS roles.
+    # 0xDA carries four int16s; which is driver torque vs EPS torque is unknown,
+    # so steeringPressed stays False rather than guessing an override signal.
     ret.steeringTorque = cp.vl["STEER_TORQUE_SENSOR"]["TORQUE_1"]
     ret.steeringTorqueEps = cp.vl["STEER_TORQUE_SENSOR"]["TORQUE_2"]
     ret.steeringPressed = False
-    ret.brakePressed = cp.vl["BRAKE_MODULE"]["BRAKE_PRESSED"] != 0
-    ret.gasPressed = cp.vl["GAS_PEDAL"]["GAS_PEDAL_USER"] != 0
-    ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(int(cp.vl["GEAR_PACKET"]["GEAR"]), None))
 
+    ret.brakePressed = cp.vl["BRAKE_MODULE"]["BRAKE_PRESSED"] != 0
+    # 0x116 byte 1, driver gas pedal. Rest is a true 0 (100% zero while
+    # braking), so != 0 matches the panda's own gas check exactly.
+    ret.gasPressed = cp.vl["GAS_PEDAL"]["GAS_PEDAL_USER"] != 0
+
+    ret.gearShifter = self.parse_gear_shifter(
+      self.shifter_values.get(int(cp.vl["GEAR_PACKET"]["GEAR"]), None))
+
+    # ACC state from 0x8A, 40 Hz. DECODED FROM A REAL DRIVE 2026-09-09:
+    #   ACC_STATE  byte 7  : 0x12 = on but not engaged, 0x47 = engaged
+    #   ACC_ENGAGED byte 22 mask 0x10 : the clean engaged bit
+    # Both are INDEPENDENT of 0x13C and lead it by ~100ms, so they report the
+    # DRIVER'S intent, not the command. That is what makes LIVE possible: when
+    # openpilot transmits 0x13C these still report engage and cancel correctly.
+    # ACC_STATE is BINARY on this car: 0x12 (not engaged) or 0x47 (engaged),
+    # and nothing else across 7232 frames covering three engagements. There is
+    # no "powered on but not engaged" standby state, because the ACC main
+    # button engages directly at the current speed -- confirmed by the owner,
+    # and consistent with every transition being a single 0x12 -> 0x47 step
+    # with no intermediate value.
+    #
+    # So `available` is not a state this car reports: the system is offerable
+    # whenever it is responding at all. Guarding on != 0 keeps a fault (no
+    # frames -> 0) from reading as available.
     acc_state = int(cp.vl["STEER_ANGLE_ACC_STATUS"]["ACC_STATE"])
     ret.cruiseState.available = acc_state != 0
     ret.cruiseState.enabled = bool(cp.vl["STEER_ANGLE_ACC_STATUS"]["ACC_ENGAGED"])
-    ret.cruiseState.standstill = bool(cp.vl["STEER_ANGLE_ACC_STATUS"]["ACC_STANDSTILL"])
-    ret.cruiseState.speed = cp.vl["ACC_HUD"]["SET_SPEED"] * CV.MPH_TO_MS
 
+    # 0x251 byte 2, increments exactly one per +/- press. CONFIRMED mph against
+    # the dash on 2026-09-09, factor 1.0 (the raw byte IS the displayed number).
+    ret.cruiseState.speed = cp.vl["ACC_HUD"]["SET_SPEED"] * CV.MPH_TO_MS
+    # 0x8A byte 7 mask 0x20: engaged and holding at a stop behind a lead car.
+    # Captured 2026-09-09 (492 frames at 0.0 kph). openpilot uses this to raise
+    # resumeRequired instead of assuming it may just drive off.
+    ret.cruiseState.standstill = bool(cp.vl["STEER_ANGLE_ACC_STATUS"]["ACC_STANDSTILL"])
+
+    # Not decoded on this platform -- inert rather than guessed.
     ret.doorOpen = False
     ret.seatbeltUnlatched = False
     ret.leftBlinker = False
@@ -343,57 +313,74 @@ class CarState(CarStateBase):
     ret.steerFaultPermanent = False
     ret.buttonEvents = []
 
+    # Kept for a future Phase 2. Note opendbc's add_mac() only handles 8-byte
+    # SecOC frames; every signed message here except 0x0F is 32-byte CAN FD.
     self.secoc_synchronization = copy.copy(cp.vl["SECOC_SYNCHRONIZATION"])
-    if cp_cam.can_valid:
-      adas = cp_cam.vl["ADAS_ACC_REQUEST"]
-      self.tss3_accel_template = bytes(int(adas[f"BYTE{k:02d}"]) & 0xFF for k in range(32))
-      self.tss3_camera_accel = float(adas["ACCEL_REQ"])
-    else:
-      self.tss3_accel_template = None
 
-    return ret, fp_ret
+    # ---- TSS 3.0 longitudinal template capture (read-only) ----------------
+    # Reconstruct the camera's exact 0x160 frame from the cam-bus parser so the
+    # carcontroller can modify-and-forward it. 0x160 is E2E-protected (keyless
+    # CRC + counter), so this is all openpilot needs to regenerate valid frames.
+    cam = can_parsers[Bus.cam]
+    adas = cam.vl["ADAS_ACC_REQUEST"]
+    self.tss3_accel_template = bytes(int(adas[f"BYTE{k:02d}"]) & 0xFF for k in range(32))
+    self.tss3_camera_accel = float(adas["ACCEL_REQ"])
+    # Lateral rides in 0x160 too (bytes 22-23), so the 0x160 template above is all
+    # openpilot needs for BOTH accel and steer. The gateway's 0x1A0 is NOT read:
+    # it is gateway-native on bus0 and only reaches bus2 as low-rate forwarded
+    # copies once the relay closes, so requiring it at 50 Hz tripped canError.
+    # 0x13C on the powertrain bus reports whether the STOCK ACC is actively
+    # controlling. v1 only overrides accel while this is true -- the driver
+    # engages with the stalk exactly as stock; openpilot rides that engagement.
+    self.tss3_stock_lon_active = bool(cp.vl["ACC_CONTROL"]["LON_ACTIVE"])
+
+    return ret, ret_sp
 
   @staticmethod
-  def get_can_parsers(CP):
+  def get_can_parsers(CP, CP_SP):
     if CP.flags & ToyotaFlags.CAN_FD.value:
-      pt_messages = [
-        ("WHEEL_SPEEDS", 80),
-        ("STEER_ANGLE_ACC_STATUS", 40),
+      # float('nan') sets ignore_alive=True: no liveness check. Used for every
+      # message whose rate is not stated in the port doc -- guessing a rate
+      # would make CANParser mark the message not-valid and block engagement.
+      # Replace each nan with the measured rate as it is confirmed from an rlog.
+      tss3_messages = [
+        ("WHEEL_SPEEDS", float('nan')),
+        ("STEER_ANGLE_ACC_STATUS", 40),     # measured
         ("STEER_ANGLE_SENSOR", float('nan')),
         ("KINEMATICS", float('nan')),
-        ("STEER_TORQUE_SENSOR", 42),
-        ("BRAKE_MODULE", 50),
+        ("STEER_TORQUE_SENSOR", 42),        # measured
+        ("BRAKE_MODULE", float('nan')),
         ("GEAR_PACKET", float('nan')),
-        ("SECOC_SYNCHRONIZATION", 10),
-        ("ACC_CONTROL", 20),
-        ("GAS_PEDAL", 42),
-        ("ACC_HUD", float('nan')),
+        ("SECOC_SYNCHRONIZATION", 10),      # measured
+        ("ACC_CONTROL", 20),                # measured: 20 Hz, plaintext, bus 0
+        ("GAS_PEDAL", float('nan')),        # 0x116, driver gas pedal on bus 1
+        ("ACC_HUD", float('nan')),          # 0x251, ~1.3 Hz cluster msg (set speed)
+      ]
+      # With STOCK harness wiring the powertrain lands on TSS3_PT_BUS (bus 1,
+      # unrelayed) and the relayed pair (bus 0 <-> bus 2) carries the ADAS CAN FD
+      # bus instead. None of the messages in this DBC exist there, so the cam
+      # parser is empty -- it exists only to satisfy the expected shape.
+      # The camera's 0x160 ACC request rides the ADAS bus (relayed pair). Read
+      # it on bus 2 (the camera side) so the template is the genuine camera frame
+      # even once the relay opens and bus 0 carries openpilot's replacement.
+      tss3_cam_messages = [
+        ("ADAS_ACC_REQUEST", 40),   # 0x160: carries BOTH accel and the steer request
       ]
       return {
-        Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, TSS3_PT_BUS),
-        Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [("ADAS_ACC_REQUEST", 40)], 2),
+        Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], tss3_messages, TSS3_PT_BUS),
+        Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], tss3_cam_messages, 2),
       }
 
     pt_messages = [
       ("BLINKERS_STATE", float('nan')),
     ]
-    cam_messages = []
 
-    if CP.enableGasInterceptorDEPRECATED:
-      pt_messages.append(("GAS_SENSOR", 50))
-
-    if CP.carFingerprint in LEGACY_PRIUS_CAR:
-      pt_messages.append(("ACC_CONTROL", float('nan')))
-      if CP.flags & ToyotaFlags.DSU_BYPASS.value:
-        cam_messages.append(("ACC_CONTROL", float('nan')))
-
-    if CP.carFingerprint in DISTANCE_BUTTON_CAR:
-      pt_messages.append(("PCM_CRUISE_4", 1))
-
-    if CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD.value:
-      cam_messages.append(("PRE_COLLISION_2", 50))
+    cam_messages = [
+      ("RSA1", 0),
+      ("RSA2", 0),
+    ]
 
     return {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, 0),
-      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], cam_messages, 2),
+      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [] + cam_messages, 2),
     }
