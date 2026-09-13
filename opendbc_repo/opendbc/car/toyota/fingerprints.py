@@ -1,4 +1,4 @@
-""" AUTO-FORMATTED USING opendbc/car/debug/format_fingerprints.py, EDIT STRUCTURE THERE."""
+﻿""" AUTO-FORMATTED USING opendbc/car/debug/format_fingerprints.py, EDIT STRUCTURE THERE."""
 from opendbc.car.structs import CarParams
 from opendbc.car.toyota.values import CAR
 
@@ -1875,5 +1875,12 @@ FW_VERSIONS = {
       b'\x028646F0W04100\x00\x00\x00\x008646G0W04100\x00\x00\x00\x00',
       b'\x028646F5205200\x00\x00\x00\x008646G5202200\x00\x00\x00\x00',
     ],
+  },
+  CAR.TOYOTA_COROLLA_TSS3: {
+    # Phase 1: firmware versions not yet captured via UDS query.
+    # The car uses CAN FD + SecOC on the powertrain bus; FW queries
+    # over the standard 8-byte CAN path may need adaptation.
+    # Use OP_FINGERPRINT=TOYOTA_COROLLA_TSS3 env var to select manually
+    # until a UDS query session has been run on the car.
   },
 }
