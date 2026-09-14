@@ -269,6 +269,10 @@ class CarInterface(CarInterfaceBase):
     # 0x13C frames to sendcan, while the panda sat in noOutput and blocked every
     # one; the stock ACC drove throughout. Keep the two consistent.
     if stock_cp.flags & ToyotaFlags.CAN_FD.value:
+      # 0x160 uses AUTOSAR E2E CRC (keyless), not SecOC. EPS is owner-patched
+      # to accept any MAC. The CAN_FD carcontroller path never uses secoc_key.
+      # Clear the flag so card.py does not force passive mode without a key.
+      stock_cp.secOcRequired = False
       stock_cp.alphaLongitudinalAvailable = TSS3_LONG_MODE != TSS3LongMode.OFF
       # Self-sufficient, same as the first pass: SHADOW/LIVE drive oplong off
       # TSS3_LONG_MODE directly, NOT the AlphaLongitudinalEnabled param (which is

@@ -656,28 +656,21 @@ class TSS3LongMode:
           you validate 0x13C construction at zero risk: compare openpilot's
           intended accel against the stock 0x13C.ACCEL_CMD in the same rlog.
 
-  LIVE    openpilot actually sends 0x13C. NOT READY -- two hard blockers:
-
-          1. Engagement/cancel. cruiseState.enabled is currently derived from
-             0x13C.LON_ACTIVE, i.e. from the STOCK system's own command. The
-             moment openpilot takes 0x13C over, that signal is openpilot's own
-             output and can no longer report whether the driver engaged or
-             cancelled. A separate cruise-button / ACC-state message must be
-             decoded first (port doc section 12.2 item 2). This is the real
-             reason that item is a safety blocker, not a nicety.
-
-          2. panda safety must permit 0x13C, and the relay must actually sit
-             between the stock 0x13C sender and the powertrain bus. 0x13C is
-             declared .check_relay = true, so if the stock sender keeps putting
-             it on the destination bus the panda raises relay_malfunction and
-             blocks ALL transmission. See port/PANDA_TSS3_SAFETY.md.
+  LIVE    openpilot sends 0x160 with its own accel (modify-and-forward; panda
+          blocks the camera's copy via fwd_hook when controls_allowed). The
+          former "two blockers" are both resolved:
+          1. cruiseState.enabled reads 0x8A.ACC_ENGAGED, not 0x13C.LON_ACTIVE
+             — independent of whatever openpilot transmits.
+          2. openpilot does NOT send 0x13C; accel is carried in 0x160 (the
+             camera request, E2E-CRC protected, keyless), which the panda
+             TSS3 allowlist already permits. No relay_malfunction risk.
   """
   OFF = 0
   SHADOW = 1
   LIVE = 2
 
 
-TSS3_LONG_MODE = TSS3LongMode.SHADOW
+TSS3_LONG_MODE = TSS3LongMode.LIVE
 
 
 class TSS3LatMode:
@@ -690,7 +683,7 @@ class TSS3LatMode:
   LIVE = 2
 
 
-TSS3_LAT_MODE = TSS3LatMode.OFF
+TSS3_LAT_MODE = TSS3LatMode.LIVE
 
 # 0x1A0 STEER_ANGLE_CMD is ~0.0148 deg/count. Observed LTA authority ~+/-17 deg.
 # openpilot's own command clamped to this; panda enforces its own angle/rate limit.
