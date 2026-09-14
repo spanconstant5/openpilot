@@ -225,23 +225,14 @@ class CAR(Platforms):
     CarSpecs(mass=3060. * CV.LB_TO_KG, wheelbase=2.67, steerRatio=13.9, tireStiffnessFactor=0.444),
   )
   TOYOTA_COROLLA_TSS3 = ToyotaCanFDSecOCPlatformConfig(
-    [ToyotaSecOcCarDocs("Toyota Corolla 2023", min_enable_speed=MIN_ACC_SPEED)],
-    # Same specs opendbc already uses for the E210 Corolla (TOYOTA_COROLLA_TSS2),
-    # which is the vetted middle ground between the 2.70 m sedan and the 2.64 m
-    # hatchback. The VIN (WMI 5YF = Toyota Motor Manufacturing Mississippi)
-    # indicates the US-built sedan.
-    #
-    # WHEELBASE AND THE DBC STEER_ANGLE FACTOR ARE COUPLED. The passive-log fit
-    # pinned only scale/steerRatio = 0.061 deg/count AT L = 2.64 m. Since
-    # delta = yaw * L / v, the inferred scale moves with the wheelbase:
-    #     L = 2.64 -> 0.0610/ratio -> 0.848 deg/count at steerRatio 13.9
-    #     L = 2.67 -> 0.0617/ratio -> 0.858 deg/count   <- used, see the DBC
-    #     L = 2.70 -> 0.0624/ratio -> 0.867 deg/count
-    # Change wheelbase or steerRatio here and you must rescale STEER_ANGLE in
-    # toyota_corolla_tss3_pt.dbc to match, or the angle reads wrong while still
-    # correlating perfectly with curvature. Settle it on the car instead: hold a
-    # known wheel angle and read the decoded value.
-    CarSpecs(mass=3060. * CV.LB_TO_KG, wheelbase=2.67, steerRatio=13.9, tireStiffnessFactor=0.444),
+    [ToyotaSecOcCarDocs("Toyota Corolla Hybrid 2025 LE FWD", min_enable_speed=MIN_ACC_SPEED)],
+    # 2025 Toyota Corolla Hybrid LE FWD (E210 platform).
+    # mass: 3197 lbs curb weight (Toyota USA spec, LE FWD).
+    # wheelbase: 2.640 m (103.9 in, E210 sedan).
+    # STEER_ANGLE in the DBC is validated as steering wheel angle at 0.061 deg/count
+    # directly on the car -- it is independent of wheelbase. steerRatio 13.9 converts
+    # to road wheel angle for path planning only.
+    CarSpecs(mass=3197. * CV.LB_TO_KG, wheelbase=2.640, steerRatio=13.9, tireStiffnessFactor=0.444),
   )
   TOYOTA_HIGHLANDER = PlatformConfig(
     [
