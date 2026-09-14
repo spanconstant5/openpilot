@@ -45,7 +45,9 @@ It does not prove that every vehicle-level CAN signal and calibration is identic
   Panda; StarPilot's substituted request is additionally clamped to
   `-1.5..1.5 m/s2`.
 - Steering changes are capped at 1,500 counts per accepted frame. A rejected
-  frame does not advance the rate-limit baseline.
+  frame does not advance the rate-limit baseline. Panda independently enforces
+  the 55-degree absolute bound and rejects nonzero steering while controls are
+  disengaged.
 - The controller emits once per new camera counter and preserves every unknown
   camera field. When it is not controlling an axis, it relays that axis's field.
 
@@ -79,3 +81,16 @@ The 152-entry union is retained in
 a TSS3 Camry census, and the moving rlog contains `carParams=MOCK` rather than an
 on-route F181 response. Automatic matching would therefore risk an ambiguous or
 wrong vehicle identity. Manual StarPilot selection remains the supported path.
+
+The manual path refreshes both the persisted `ForceFingerprint` flag and
+`CarModel` before vehicle interface selection. This fixes the observed startup
+case where an older serialized `MOCK` value overrode the user's saved Corolla
+selection and left StarPilot in dashcam mode.
+
+The logs do contain a valid target-car VIN with the 2025 model-year code, but a
+VIN does not repair the FPv1 strict-subset collision and its full value is not
+stored in this public repository. The exact EPS F181 and the successful
+2026-09-13 patch/readback evidence now bind the firmware target separately. The
+normal StarPilot firmware query still does not retrieve that response, so these
+facts do not yet create an automatic startup fingerprint. See
+`COROLLA_2025_FINGERPRINT.md` for the complete decision record.

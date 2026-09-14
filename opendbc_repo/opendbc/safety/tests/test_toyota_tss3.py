@@ -39,6 +39,7 @@ class TestToyotaTSS3(unittest.TestCase):
     self.safety.set_controls_allowed(False)
     self.assertTrue(self.safety.safety_tx_hook(self.accel_msg(0.0)))
     self.assertFalse(self.safety.safety_tx_hook(self.accel_msg(0.1)))
+    self.assertFalse(self.safety.safety_tx_hook(self.accel_msg(0.0, 1)))
     self.engage()
     self.assertTrue(self.safety.safety_tx_hook(self.accel_msg(-3.5)))
     self.assertTrue(self.safety.safety_tx_hook(self.accel_msg(2.0)))
@@ -52,6 +53,15 @@ class TestToyotaTSS3(unittest.TestCase):
     self.assertTrue(self.safety.safety_tx_hook(self.accel_msg(0.0, 21500)))
     self.assertFalse(self.safety.safety_tx_hook(self.accel_msg(0.0, 23501)))
     self.assertFalse(self.safety.safety_tx_hook(self.accel_msg(0.0, 23501)))
+
+  def test_steer_absolute_bound(self):
+    self.engage()
+    self.assertTrue(self.safety.safety_tx_hook(self.accel_msg(0.0, 29574)))
+    self.assertFalse(self.safety.safety_tx_hook(self.accel_msg(0.0, 29575)))
+    self.setUp()
+    self.engage()
+    self.assertTrue(self.safety.safety_tx_hook(self.accel_msg(0.0, -29574)))
+    self.assertFalse(self.safety.safety_tx_hook(self.accel_msg(0.0, -29575)))
 
 
 if __name__ == "__main__":

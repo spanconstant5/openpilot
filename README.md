@@ -1,6 +1,6 @@
 # 2025 Corolla Hybrid — StarPilot TSS 3.0 port
 
-[![Corolla TSS3 checks](https://github.com/spanconstant5/2025corolla-starpilot/actions/workflows/corolla-tss3-ci.yml/badge.svg)](https://github.com/spanconstant5/2025corolla-starpilot/actions/workflows/corolla-tss3-ci.yml)
+[![Corolla TSS3 checks](https://github.com/spanconstant5/openpilot/actions/workflows/corolla-tss3-ci.yml/badge.svg?branch=spangpt)](https://github.com/spanconstant5/openpilot/actions/workflows/corolla-tss3-ci.yml)
 
 This repository is a StarPilot-based openpilot build for one target: the
 Span/`spanconstant5` 2025 Toyota Corolla Hybrid with Toyota Safety Sense 3.0.
@@ -25,7 +25,7 @@ this repository.
 | Lateral command | Implemented | Steering request in `0x160` bytes 22–23 at 537.7 counts/degree, supplied route-28 result |
 | E2E protection | Implemented and tested | Counter plus CRC-16/CCITT with data ID `0x444A` |
 | Panda safety | Debug-gated and tested | Only 32-byte `0x160` on bus 0 is accepted in TSS3 mode |
-| Automatic vehicle identification | Unresolved | Available moving traces are not uniquely joined to the 2025 F181 identity |
+| Vehicle identification | Manual path implemented | Saved `TOYOTA_COROLLA_TSS3` selection is refreshed before interface startup; automatic CAN matching remains blocked by the Corolla/Camry census overlap |
 | Vehicle-specific tuning | Unresolved | Exact 2025 mass, steering ratio calibration, and driver-override threshold are not proved |
 
 ## Use the manual vehicle selection
@@ -40,10 +40,30 @@ in StarPilot's vehicle settings and enable **Disable Fingerprinting**. This uses
 StarPilot's existing `CarModel` override. The port does not add a partial
 fingerprint that could silently identify another Toyota as this car.
 
-Automatic matching needs several full `rlog` segments from this exact car,
-covering startup, standstill, forward driving, reverse, turn signals, doors,
-braking, cruise transitions, and other infrequent messages. A `qlog` is too
-sparse. Generate a review candidate offline with:
+The startup path reads both `ForceFingerprint` and `CarModel` directly from
+persistent parameters before selecting the vehicle interface. This avoids a
+stale previous-route `MOCK` snapshot sending a valid manual selection into
+dashcam mode.
+
+## Install `spangpt`
+
+On a freshly reset comma device, choose **Custom Software** and enter:
+
+```text
+installer.comma.ai/spanconstant5/spangpt
+```
+
+The installable source is the
+[`spangpt` branch of `spanconstant5/openpilot`](https://github.com/spanconstant5/openpilot/tree/spangpt).
+The comma installer resolves custom branches from a repository named
+`openpilot`. GitHub also permits only one fork per account within this shared
+openpilot/FrogPilot/StarPilot fork network, and `spanconstant5/openpilot` is the
+existing account fork. This branch is based directly on StarPilot commit
+`ac3fb6a4d889bb0e43373d602ad80ac349ecb81c`.
+
+Automatic matching cannot be enabled from this car's logs alone. Full `rlog`
+segments are still useful for building and checking a review candidate; a
+`qlog` is too sparse. Generate the candidate offline with:
 
 ```bash
 PYTHONPATH=.:opendbc_repo python tools/corolla_tss3_fingerprint.py \
@@ -54,6 +74,12 @@ The tool unions every address below `0x800`, rejects changing DLCs, rejects
 short captures, and reports whether the last segment still adds addresses. It
 prints a candidate; it does not modify `fingerprints.py`. Add a candidate only
 after it has converged and is distinguishable from other supported platforms.
+
+The two supplied full rlogs now converge, but comparison against the retained
+Camry TSS3 evidence proves that convergence is not uniqueness. The resulting
+CAN sets remain census evidence and must not be registered as FPv1. The exact
+identity decision and the remaining automatic-selection path are documented in
+[docs/COROLLA_2025_FINGERPRINT.md](docs/COROLLA_2025_FINGERPRINT.md).
 
 ## What changed
 
@@ -82,6 +108,8 @@ Panda limits acceleration to the observed stock relay envelope of
 `-3.5..2.0 m/s²`; the controller currently clamps its substituted request to
 `-1.5..1.5 m/s²`. Steering may change by at most 1,500 counts per accepted
 camera frame. A rejected command does not advance the rate-limit baseline.
+Panda also enforces the controller's 55-degree absolute request bound and
+rejects nonzero steering whenever controls are disengaged.
 
 A production Panda build does not enable this experimental safety allowlist and
 will reject the controller's 0x160 output. That is intentional until the
@@ -120,9 +148,9 @@ pytest -q tools/tests/test_corolla_tss3_fingerprint.py tools/tests/test_corolla_
 ## Related repositories and provenance
 
 - [spanconstant5/2025fwpatch](https://github.com/spanconstant5/2025fwpatch) is
-  the separate EPS firmware patch project. Its 2025 dump verifier is complete,
-  but its runtime flasher remains blocked for the 2025 secondary F181 until the
-  retained payload and route are proved on that target.
+  the separate EPS firmware patch project. The 2026-09-13 retained bundle
+  reports a complete exact-identity target write, CRC write, and matching final
+  readbacks. That proves the patch transaction, not StarPilot driving behavior.
 - [kaikozlov/ghidra_rh850](https://github.com/kaikozlov/ghidra_rh850) is the
   evidence authority for the 2025 EPS identity and application comparison.
 - This repository is based on

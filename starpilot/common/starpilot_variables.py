@@ -31,6 +31,7 @@ from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.starpilot.common.model_versions import is_tinygrad_model_version
 from openpilot.starpilot.common.lateral_delay import full_lateral_delay
 from openpilot.starpilot.common.lateral_only_experimental import lateral_only_experimental_available
+from openpilot.starpilot.common.manual_fingerprint import apply_persisted_manual_fingerprint
 from openpilot.starpilot.common.accel_profile import (
   ACCELERATION_PROFILES,
   A_CRUISE_MAX_BP_CUSTOM,
@@ -357,14 +358,25 @@ def get_starpilot_toggles(sm=messaging.SubMaster(["starpilotPlan"]), *, read_per
     if not hasattr(get_starpilot_toggles, "_params"):
       get_starpilot_toggles._params = Params(return_defaults=True)
 
-    toggles.force_offroad = get_starpilot_toggles._params.get_bool("ForceOffroad")
-    toggles.force_onroad = get_starpilot_toggles._params.get_bool("ForceOnroad")
+    persisted_params = get_starpilot_toggles._params
+    toggles.force_offroad = persisted_params.get_bool("ForceOffroad")
+    toggles.force_onroad = persisted_params.get_bool("ForceOnroad")
     # Controller selection happens before the first live StarPilot broadcast. Do
     # not let a cached CarParams/controller type hide the persisted user request.
-    toggles.force_torque_controller = get_starpilot_toggles._params.get_bool("ForceTorqueController")
+    toggles.force_torque_controller = persisted_params.get_bool("ForceTorqueController")
     # Controller selection happens before the first live StarPilot broadcast.
     # Realtime callers use the serialized value to avoid blocking reads.
-    toggles.rivian_angle_control = get_starpilot_toggles._params.get_bool("RivianAngleControl")
+    toggles.rivian_angle_control = persisted_params.get_bool("RivianAngleControl")
+
+    # Vehicle interface selection has the same startup ordering constraint. A
+    # cached toggle broadcast may still contain the previous route's MOCK
+    # platform even though the user selected a real platform while offroad.
+    # Refresh both sides of the override atomically from persistent Params.
+    get_param = getattr(persisted_params, "get", None)
+    if get_param is not None:
+      apply_persisted_manual_fingerprint(
+        toggles, persisted_params, normalize_legacy_car_model, str(MOCK.MOCK)
+      )
   return toggles
 
 @cache

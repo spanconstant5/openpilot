@@ -74,6 +74,28 @@ def test_get_starpilot_toggles_uses_persisted_force_torque_request(monkeypatch):
   assert toggles.force_torque_controller is True
 
 
+def test_get_starpilot_toggles_uses_persisted_manual_fingerprint_at_startup(monkeypatch):
+  class PersistedParams:
+    @staticmethod
+    def get_bool(key):
+      return key == "ForceFingerprint"
+
+    @staticmethod
+    def get(key):
+      return "TOYOTA_COROLLA_TSS3" if key == "CarModel" else None
+
+  monkeypatch.setattr(spv.get_starpilot_toggles, "_params", PersistedParams(), raising=False)
+
+  payload = '{"force_fingerprint": false, "car_model": "MOCK"}'
+  toggles = spv.get_starpilot_toggles(
+    {"starpilotPlan": SimpleNamespace(starpilotToggles=payload)},
+    read_persisted_force_params=True,
+  )
+
+  assert toggles.force_fingerprint is True
+  assert toggles.car_model == "TOYOTA_COROLLA_TSS3"
+
+
 def test_get_starpilot_toggles_realtime_path_does_not_read_persisted_force_params(monkeypatch):
   class UnexpectedParamsRead:
     def get_bool(self, key):

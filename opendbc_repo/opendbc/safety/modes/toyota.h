@@ -303,6 +303,7 @@ static bool toyota_tx_hook(const CANPacket_t *msg) {
     .max_accel = 2000,
     .min_accel = -3500,
   };
+  const int TOYOTA_TSS3_MAX_STEER = 29574;  // 55 deg at 537.7 counts/deg
   const int TOYOTA_TSS3_MAX_STEER_DELTA = 1500;
 
   bool tx = true;
@@ -351,6 +352,8 @@ static bool toyota_tx_hook(const CANPacket_t *msg) {
 
       int desired_steer = (msg->data[22] << 8U) | msg->data[23];
       desired_steer = to_signed(desired_steer, 16);
+      violation |= SAFETY_ABS(desired_steer) > TOYOTA_TSS3_MAX_STEER;
+      violation |= !controls_allowed && (desired_steer != 0);
       if (controls_allowed) {
         if (tss3_steer_angle_inited && (SAFETY_ABS(desired_steer - tss3_last_steer_angle) > TOYOTA_TSS3_MAX_STEER_DELTA)) {
           violation = true;
@@ -541,6 +544,8 @@ static safety_config toyota_init(uint16_t param) {
 #ifdef ALLOW_DEBUG
   toyota_tss3 = GET_FLAG(param, TOYOTA_PARAM_TSS3);
 #endif
+  tss3_last_steer_angle = 0;
+  tss3_steer_angle_inited = false;
   toyota_dbc_eps_torque_factor = param & TOYOTA_EPS_FACTOR;
 
   if (toyota_stock_longitudinal || toyota_secoc) {
