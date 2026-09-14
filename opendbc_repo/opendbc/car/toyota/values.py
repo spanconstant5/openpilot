@@ -241,10 +241,14 @@ class CAR(Platforms):
     CarSpecs(mass=3060. * CV.LB_TO_KG, wheelbase=2.67, steerRatio=13.9, tireStiffnessFactor=0.444),
   )
   TOYOTA_COROLLA_TSS3 = ToyotaCanFDSecOCPlatformConfig(
-    [ToyotaCommunityCarDocs("Toyota Corolla Hybrid 2025 (TSS 3.0)", min_enable_speed=MIN_ACC_SPEED)],
-    # The control geometry is inherited from the validated 2023 E210 port.
-    # Target-specific mass and steering calibration remain unresolved.
-    CarSpecs(mass=3060. * CV.LB_TO_KG, wheelbase=2.67, steerRatio=13.9, tireStiffnessFactor=0.444),
+    [ToyotaCommunityCarDocs("Toyota Corolla Hybrid 2025 LE FWD", min_enable_speed=MIN_ACC_SPEED)],
+    # 2025 Toyota Corolla Hybrid LE FWD (E210 platform).
+    # mass: 3197 lbs curb weight (Toyota USA spec, LE FWD).
+    # wheelbase: 2.640 m (103.9 in, E210 sedan).
+    # STEER_ANGLE in the DBC is validated as steering wheel angle at 0.061 deg/count
+    # directly on the car -- it is independent of wheelbase. steerRatio 13.9 converts
+    # to road wheel angle for path planning only.
+    CarSpecs(mass=3197. * CV.LB_TO_KG, wheelbase=2.640, steerRatio=13.9, tireStiffnessFactor=0.444),
   )
   TOYOTA_HIGHLANDER = PlatformConfig(
     [
