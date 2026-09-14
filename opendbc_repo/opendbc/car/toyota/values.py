@@ -678,7 +678,7 @@ class TSS3LongMode:
   LIVE = 2
 
 
-TSS3_LONG_MODE = TSS3LongMode.SHADOW
+TSS3_LONG_MODE = TSS3LongMode.LIVE
 
 
 class TSS3LatMode:
@@ -691,7 +691,7 @@ class TSS3LatMode:
   LIVE = 2
 
 
-TSS3_LAT_MODE = TSS3LatMode.OFF
+TSS3_LAT_MODE = TSS3LatMode.LIVE
 
 # 0x1A0 STEER_ANGLE_CMD is ~0.0148 deg/count. Observed LTA authority ~+/-17 deg.
 # openpilot's own command clamped to this; panda enforces its own angle/rate limit.
