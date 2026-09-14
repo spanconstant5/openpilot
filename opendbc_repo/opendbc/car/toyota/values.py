@@ -56,7 +56,7 @@ class ToyotaSafetyFlags(IntFlag):
   STOCK_LONGITUDINAL = (2 << 8)
   LTA = (4 << 8)
   SECOC = (8 << 8)
-  TSS3 = (16 << 8)
+  TSS3 = (128 << 8)
 
 
 class ToyotaFlags(IntFlag):
@@ -221,8 +221,11 @@ class CAR(Platforms):
     CarSpecs(mass=3060. * CV.LB_TO_KG, wheelbase=2.67, steerRatio=13.9, tireStiffnessFactor=0.444),
   )
   TOYOTA_COROLLA_TSS3 = ToyotaCanFDSecOCPlatformConfig(
-    [ToyotaSecOcCarDocs("Toyota Corolla 2023", min_enable_speed=MIN_ACC_SPEED)],
-    CarSpecs(mass=3060. * CV.LB_TO_KG, wheelbase=2.67, steerRatio=13.9, tireStiffnessFactor=0.444),
+    [ToyotaSecOcCarDocs("Toyota Corolla Hybrid 2025 LE FWD", min_enable_speed=MIN_ACC_SPEED)],
+    # 2025 Toyota Corolla Hybrid LE FWD (E210 platform).
+    # mass: 3197 lbs curb weight (Toyota USA spec, LE FWD).
+    # wheelbase: 2.640 m (103.9 in, E210 sedan).
+    CarSpecs(mass=3197. * CV.LB_TO_KG, wheelbase=2.640, steerRatio=13.9, tireStiffnessFactor=0.444),
   )
   TOYOTA_HIGHLANDER = PlatformConfig(
     [
