@@ -144,7 +144,7 @@ class ToyotaSecOCPlatformConfig(PlatformConfig):
 @dataclass
 class ToyotaCanFDSecOCPlatformConfig(PlatformConfig):
   """TSS 3.0 CAN FD platform with a dedicated 32-byte powertrain DBC."""
-  dbc_dict: dict = field(default_factory=lambda: {Bus.pt: 'toyota_corolla_tss3_pt'})
+  dbc_dict: dict = field(default_factory=lambda: {Bus.pt: 'toyota_corolla__pt'})
 
   def init(self):
     self.flags |= (ToyotaFlags.HYBRID | ToyotaFlags.TSS2 | ToyotaFlags.NO_DSU |
@@ -240,7 +240,7 @@ class CAR(Platforms):
     ],
     CarSpecs(mass=3060. * CV.LB_TO_KG, wheelbase=2.67, steerRatio=13.9, tireStiffnessFactor=0.444),
   )
-  TOYOTA_COROLLA_TSS3 = ToyotaCanFDSecOCPlatformConfig(
+  TOYOTA_COROLLA_ = ToyotaCanFDSecOCPlatformConfig(
     [ToyotaCommunityCarDocs("Toyota Corolla Hybrid 2025 LE FWD", min_enable_speed=MIN_ACC_SPEED)],
     # 2025 Toyota Corolla Hybrid LE FWD (E210 platform).
     # mass: 3197 lbs curb weight (Toyota USA spec, LE FWD).
@@ -658,25 +658,25 @@ TOYOTA_AUTO_HOLD_CARS = (TSS2_CAR - RADAR_ACC_CAR - SECOC_CAR) | {
 NO_STOP_TIMER_CAR = CAR.with_flags(ToyotaFlags.NO_STOP_TIMER)
 
 
-class TSS3LongMode:
+class LongMode:
   OFF = 0
   SHADOW = 1
   LIVE = 2
 
 
-class TSS3LatMode:
+class LatMode:
   OFF = 0
   SHADOW = 1
   LIVE = 2
 
 
-# These modes are evaluated only for the explicitly selected TSS3 platform.
-# The panda TSS3 safety flag supplies the independent tx/rx allowlist gate.
-TSS3_LONG_MODE = TSS3LongMode.LIVE
+# These modes are evaluated only for the explicitly selected  platform.
+# The panda  safety flag supplies the independent tx/rx allowlist gate.
+_LONG_MODE = TSS3LongMode.LIVE
 # Lateral goes out on 0x1A0 (ADAS_STEER_COMMAND). SHADOW sends well-formed frames with
 # STEER_REQUEST off (no steering) so a drive can confirm the car accepts them and the
 # commanded angle direction is right, before flipping to LIVE. Start fail-closed in SHADOW.
-TSS3_LAT_MODE = TSS3LatMode.SHADOW
+TSS3_LAT_MODE = TSS3LatMode.LIVE
 TSS3_LAT_RELAY_ONLY = False
 TSS3_MAX_STEER_ANGLE = 15.0        # deg steering-wheel authority cap (stock LTA ~17 deg observed)
 TSS3_MAX_STEER_ANGLE_RATE = 1.5    # deg per 0x1A0 frame (~30 deg/s at 20 Hz); panda enforces its own cap
