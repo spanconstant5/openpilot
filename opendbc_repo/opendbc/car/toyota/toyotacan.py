@@ -1,6 +1,6 @@
 from opendbc.car.structs import CarParams
 from opendbc.car.can_definitions import CanData
-from opendbc.car.toyota.e2e import apply_e2e_160
+from opendbc.car.toyota.e2e import apply_e2e_160, apply_e2e_1a0
 
 SteerControlType = CarParams.SteerControlType
 
@@ -205,11 +205,21 @@ def toyota_checksum(address: int, sig, d: bytearray) -> int:
 
 TSS3_ADAS_ACC_REQUEST = 0x160
 TSS3_ACCEL_SCALE = 0.001
-TSS3_STEER_160_SCALE = 537.7
+
+# 0x1A0 ADAS_STEER_COMMAND (lateral). See toyota_corolla_tss3_pt.dbc:
+#   STEER_ANGLE_CMD = bytes[11:13], signed 16-bit BE, 0.0148 deg/count (corr 0.98 vs measured angle)
+#   STEER_REQUEST   = byte 6 bit 6 (mask 0x40) per DBC — UNVERIFIED activation (LTA never active in logs)
+TSS3_ADAS_STEER_COMMAND = 0x1A0
+TSS3_STEER_1A0_DEG_TO_CAN = 1.0 / 0.0148
+TSS3_STEER_REQUEST_BIT = 0x40  # byte 6
 
 
-def modify_tss3_160(template: bytes, accel: float | None, angle: float | None, counter: int) -> CanData:
-  """Modify the camera's combined TSS3 request while preserving all unknown fields."""
+def modify_tss3_160(template: bytes, accel: float | None, counter: int) -> CanData:
+  """Modify the camera's ADAS_ACC_REQUEST longitudinal fields, preserving all other bytes.
+
+  0x160 is longitudinal ONLY. Steering lives in 0x1A0 (see modify_1a0). byte4 bit7 (0x80)
+  is a separate constant=1 flag and is preserved.
+  """
   if len(template) != 32:
     raise ValueError(f"0x160 template must be 32 bytes, got {len(template)}")
 
@@ -219,10 +229,32 @@ def modify_tss3_160(template: bytes, accel: float | None, angle: float | None, c
     buf[4] = (buf[4] & 0x80) | ((raw_accel >> 8) & 0x7F)
     buf[5] = raw_accel & 0xFF
 
-  if angle is not None:
-    raw_angle = max(-32768, min(32767, round(angle * TSS3_STEER_160_SCALE))) & 0xFFFF
-    buf[22] = (raw_angle >> 8) & 0xFF
-    buf[23] = raw_angle & 0xFF
-
   buf[2] = counter & 0xFF
   return CanData(TSS3_ADAS_ACC_REQUEST, apply_e2e_160(bytes(buf)), 0)
+
+
+def modify_1a0(template: bytes, angle: float | None, steer_req: bool = False) -> CanData:
+  """Modify the camera's ADAS_STEER_COMMAND (0x1A0) lateral fields, preserving unknown bytes.
+
+  Modify-and-forward the 48-byte camera frame: overwrite STEER_ANGLE_CMD (byte 11-12) and,
+  when steer_req is True, set STEER_REQUEST (byte 6 bit 6), then recompute the keyless E2E CRC.
+  The camera's counter (byte 2) and every other byte are preserved.
+
+  NOTE: steer_req defaults False. The STEER_REQUEST activation and the EPS angle-rate envelope
+  are not yet confirmed from a stock-LTA-active capture, so callers must keep it False until then.
+  """
+  if len(template) != 48:
+    raise ValueError(f"0x1A0 template must be 48 bytes, got {len(template)}")
+
+  buf = bytearray(template)
+  if angle is not None:
+    raw_angle = max(-32768, min(32767, round(angle * TSS3_STEER_1A0_DEG_TO_CAN))) & 0xFFFF
+    buf[11] = (raw_angle >> 8) & 0xFF
+    buf[12] = raw_angle & 0xFF
+
+  if steer_req:
+    buf[6] |= TSS3_STEER_REQUEST_BIT
+  else:
+    buf[6] &= ~TSS3_STEER_REQUEST_BIT & 0xFF
+
+  return CanData(TSS3_ADAS_STEER_COMMAND, apply_e2e_1a0(bytes(buf)), 0)

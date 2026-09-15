@@ -12,8 +12,7 @@ from opendbc.car.toyota import toyotacan
 from opendbc.car.toyota.values import CAR, MIN_ACC_SPEED, NO_STOP_TIMER_CAR, PEDAL_TRANSITION, TSS2_CAR, \
                                         CarControllerParams, ToyotaFlags, \
                                         UNSUPPORTED_DSU_CAR, LEGACY_PRIUS_CAR, TOYOTA_AUTO_HOLD_CARS, \
-                                        TSS3_LONG_MODE, TSS3LongMode, TSS3_LAT_MODE, TSS3LatMode, \
-                                        TSS3_LAT_RELAY_ONLY, TSS3_MAX_STEER_ANGLE, TSS3_MIN_OVERRIDE_SPEED
+                                        TSS3_LONG_MODE, TSS3LongMode, TSS3_MIN_OVERRIDE_SPEED
 from opendbc.can import CANPacker
 
 Ecu = structs.CarParams.Ecu
@@ -352,23 +351,20 @@ class CarController(CarControllerBase):
                  CS.out.cruiseState.enabled and not CS.out.gasPressed and
                  template is not None)
       long_controlling = engaged and CC.longActive and CS.out.vEgo > TSS3_MIN_OVERRIDE_SPEED
-      lat_controlling = (engaged and TSS3_LAT_MODE == TSS3LatMode.LIVE and
-                         CC.latActive and not TSS3_LAT_RELAY_ONLY)
       applied_angle = 0.0
       applied_accel = 0.0
 
-      # Emit exactly once per new camera frame, retaining the camera counter and
-      # every field other than the explicitly substituted accel/steer requests.
+      # 0x160 is longitudinal ONLY. Steering is a separate message, 0x1A0 (see
+      # toyotacan.modify_1a0). The 0x1A0 send path (carstate template capture, panda TX
+      # allowlist/safety, and a confirmed STEER_REQUEST + angle-rate envelope) is not wired
+      # yet, so lateral is relay-only here and openpilot commands no steer angle.
+      #
+      # Emit exactly once per new camera frame, retaining the camera counter and every
+      # field other than the substituted accel request.
       if engaged and cam_counter != self.tss3_last_cam_counter:
         applied_accel = float(np.clip(actuators.accel, -1.5, 1.5)) if long_controlling else 0.0
         accel = applied_accel if long_controlling else None
-        if lat_controlling:
-          applied_angle = float(np.clip(actuators.steeringAngleDeg,
-                                        -TSS3_MAX_STEER_ANGLE, TSS3_MAX_STEER_ANGLE))
-          angle = applied_angle
-        else:
-          angle = None
-        can_sends.append(toyotacan.modify_tss3_160(template, accel, angle, cam_counter))
+        can_sends.append(toyotacan.modify_tss3_160(template, accel, cam_counter))
         self.tss3_last_cam_counter = cam_counter
       elif not engaged:
         self.tss3_last_cam_counter = cam_counter
