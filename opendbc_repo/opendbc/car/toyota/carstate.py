@@ -361,7 +361,7 @@ class CarState(CarStateBase):
         ("STEER_ANGLE_ACC_STATUS", 40),
         ("STEER_ANGLE_SENSOR", float('nan')),
         ("KINEMATICS", float('nan')),
-        ("STEER_TORQUE_SENSOR", 42),
+        ("STEER_TORQUE_SENSOR", float('nan')),
         ("BRAKE_MODULE", 50),
         ("GEAR_PACKET", float('nan')),
         ("SECOC_SYNCHRONIZATION", 10),
