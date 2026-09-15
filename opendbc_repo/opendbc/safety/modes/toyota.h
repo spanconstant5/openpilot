@@ -49,8 +49,8 @@
   {0x183, 0, 8, .check_relay = true},  /* ACC_CONTROL_2 */ \
 
 #define TOYOTA_TSS3_TX_MSGS \
-  {0x160, 0, 32, .check_relay = true, .disable_static_blocking = true}, \
-  {0x1A0, 0, 48, .check_relay = true, .disable_static_blocking = true}, \
+  {0x160, 0, 32, .check_relay = true}, \
+  {0x1A0, 0, 48, .check_relay = true}, \
 
 #define TOYOTA_COMMON_RX_CHECKS(lta)                                                                                                       \
   {.msg = {{ 0xaa, 0, 8, 83U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
@@ -100,10 +100,10 @@
 
 static bool toyota_secoc = false;
 static bool toyota_tss3 = false;
-// 0x1A0 ADAS_STEER_COMMAND angle-rate tracking + camera-relay gating
+// 0x1A0 ADAS_STEER_COMMAND angle-rate tracking. The camera's 0x160/0x1A0 are statically
+// blocked (check_relay, no disable_static_blocking); openpilot is the sole sender on bus 0.
 static int tss3_1a0_last_angle = 0;
 static bool tss3_1a0_angle_inited = false;
-static int tss3_1a0_relay_block = 0;
 static bool toyota_alt_brake = false;
 static bool toyota_stock_longitudinal = false;
 static bool toyota_lta = false;
@@ -309,7 +309,6 @@ static bool toyota_tx_hook(const CANPacket_t *msg) {
   // 0x1A0 STEER_ANGLE_CMD limits: 0.0148 deg/count (~67.6 counts/deg).
   const int TOYOTA_TSS3_1A0_MAX_ANGLE = 1050;  // ~15.5 deg, just above the 15 deg openpilot cap
   const int TOYOTA_TSS3_1A0_MAX_DELTA = 150;   // ~2.2 deg per 20 Hz frame
-  const int TOYOTA_TSS3_1A0_RELAY_BLOCK_FRAMES = 5;
 
   bool tx = true;
 
@@ -359,9 +358,10 @@ static bool toyota_tx_hook(const CANPacket_t *msg) {
     }
 
     // 0x1A0 ADAS_STEER_COMMAND: STEER_ANGLE_CMD byte 11-12 (16-bit signed BE), STEER_REQUEST
-    // byte 6 bit 6. Absolute angle + per-frame rate limited while controls are allowed; when
-    // not allowed, only STEER_REQUEST-off frames may pass. A passing frame arms the camera
-    // relay block so the stock 0x1A0 stops reaching the EPS while openpilot is steering.
+    // byte 6 bit 6. openpilot is the sole sender of 0x1A0 on bus 0 (camera copy statically
+    // blocked), so a STEER_REQUEST-off frame is the normal forward-through when not steering.
+    // Absolute angle + per-frame rate limited while controls are allowed; when not allowed,
+    // only STEER_REQUEST-off frames may pass.
     if (toyota_tss3 && (msg->addr == 0x1A0U)) {
       int desired_angle = (msg->data[11] << 8U) | msg->data[12];
       desired_angle = to_signed(desired_angle, 16);
@@ -384,9 +384,6 @@ static bool toyota_tx_hook(const CANPacket_t *msg) {
           violation = true;
         }
         tss3_1a0_angle_inited = false;
-      }
-      if (!violation) {
-        tss3_1a0_relay_block = TOYOTA_TSS3_1A0_RELAY_BLOCK_FRAMES;
       }
       tx = !violation;
     }
@@ -671,22 +668,10 @@ static safety_config toyota_init(uint16_t param) {
 
 static bool toyota_fwd_hook(int bus_num, int addr) {
   bool block_msg = false;
-  if (toyota_tss3 && (bus_num == 2) && (addr == 0x160)) {
-    // Block the camera's 0x160 relay only while openpilot is injecting its own (long
-    // controlling). When disengaged, let the camera's 0x160 through so the ACC ECU keeps
-    // receiving it. (The DRCC/"System Malfunction" fault came from openpilot corrupting
-    // 0x160 steer bytes, since fixed by routing lateral to 0x1A0 -- not from this relay.)
-    block_msg = get_longitudinal_allowed();
-  }
-  if (toyota_tss3 && (bus_num == 2) && (addr == 0x1A0)) {
-    // Block the camera's 0x1A0 relay only while openpilot is actively sending its own (the
-    // tx hook arms tss3_1a0_relay_block on each accepted frame). Otherwise let stock LTA
-    // through. Self-expiring so the camera resumes shortly after openpilot stops steering.
-    if (tss3_1a0_relay_block > 0) {
-      tss3_1a0_relay_block--;
-      block_msg = true;
-    }
-  }
+  // 0x160 and 0x1A0 are check_relay TX msgs with static blocking enabled, so the safety
+  // core already blocks the camera's copies from bus 2 -> bus 0. openpilot is the sole sender
+  // of both on bus 0 (it forwards the camera content every frame, substituting accel/steer
+  // only when controlling), which is what keeps the panda out of relayMalfunction/noOutput.
   if (bus_num == 2) {
     block_msg |= (addr == 0x344) && ((alternative_experience & ALT_EXP_ALLOW_AEB) != 0) &&
                  !vehicle_moving && !gas_pressed && acc_main_on;
