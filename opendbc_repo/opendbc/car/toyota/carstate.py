@@ -282,7 +282,7 @@ class CarState(CarStateBase, CarStateExt):
         ("STEER_ANGLE_ACC_STATUS", 40),
         ("STEER_ANGLE_SENSOR", float('nan')),
         ("KINEMATICS", float('nan')),
-        ("STEER_TORQUE_SENSOR", 42),
+        ("STEER_TORQUE_SENSOR", float('nan')),  # 0xDA absent on PT bus (EPS fw 8965F1208 confirmed)
         ("BRAKE_MODULE", float('nan')),
         ("GEAR_PACKET", float('nan')),
         ("SECOC_SYNCHRONIZATION", 10),
