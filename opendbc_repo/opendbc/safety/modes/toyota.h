@@ -644,7 +644,7 @@ static safety_config toyota_init(uint16_t param) {
 static bool toyota_fwd_hook(int bus_num, int addr) {
   bool block_msg = false;
   if (toyota_tss3 && (bus_num == 2) && (addr == 0x160)) {
-    block_msg = get_longitudinal_allowed();
+    block_msg = true;  // always block: openpilot always injects its own 0x160 on bus 0
   }
   if (bus_num == 2) {
     block_msg |= (addr == 0x344) && ((alternative_experience & ALT_EXP_ALLOW_AEB) != 0) &&
