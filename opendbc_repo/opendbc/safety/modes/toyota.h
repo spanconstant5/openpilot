@@ -50,6 +50,7 @@
 
 #define TOYOTA_TSS3_TX_MSGS \
   {0x160, 0, 32, .check_relay = true, .disable_static_blocking = true}, \
+  {0x1A0, 0, 48, .check_relay = true, .disable_static_blocking = true}, \
 
 #define TOYOTA_COMMON_RX_CHECKS(lta)                                                                                                       \
   {.msg = {{ 0xaa, 0, 8, 83U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
@@ -99,8 +100,10 @@
 
 static bool toyota_secoc = false;
 static bool toyota_tss3 = false;
-static int tss3_last_steer_angle = 0;
-static bool tss3_steer_angle_inited = false;
+// 0x1A0 ADAS_STEER_COMMAND angle-rate tracking + camera-relay gating
+static int tss3_1a0_last_angle = 0;
+static bool tss3_1a0_angle_inited = false;
+static int tss3_1a0_relay_block = 0;
 static bool toyota_alt_brake = false;
 static bool toyota_stock_longitudinal = false;
 static bool toyota_lta = false;
@@ -247,7 +250,7 @@ static void toyota_rx_hook(const CANPacket_t *msg) {
       vehicle_moving = speed != 0;
       UPDATE_VEHICLE_SPEED(speed / 4.0 * 0.01 * KPH_TO_MS);
       if (!controls_allowed) {
-        tss3_steer_angle_inited = false;
+        tss3_1a0_angle_inited = false;
       }
     }
     if (msg->addr == 0x101U) {
@@ -303,7 +306,10 @@ static bool toyota_tx_hook(const CANPacket_t *msg) {
     .max_accel = 2000,
     .min_accel = -3500,
   };
-  const int TOYOTA_TSS3_MAX_STEER_DELTA = 1500;
+  // 0x1A0 STEER_ANGLE_CMD limits: 0.0148 deg/count (~67.6 counts/deg).
+  const int TOYOTA_TSS3_1A0_MAX_ANGLE = 1050;  // ~15.5 deg, just above the 15 deg openpilot cap
+  const int TOYOTA_TSS3_1A0_MAX_DELTA = 150;   // ~2.2 deg per 20 Hz frame
+  const int TOYOTA_TSS3_1A0_RELAY_BLOCK_FRAMES = 5;
 
   bool tx = true;
 
@@ -344,21 +350,43 @@ static bool toyota_tx_hook(const CANPacket_t *msg) {
       tx = !longitudinal_accel_checks(desired_accel, TOYOTA_LONG_LIMITS);
     }
 
+    // 0x160 ADAS_ACC_REQUEST is longitudinal only (accel byte 4-5). Steering moved to 0x1A0.
     if (toyota_tss3 && (msg->addr == 0x160U)) {
       int desired_accel = ((msg->data[4] & 0x7FU) << 8U) | msg->data[5];
       desired_accel = to_signed(desired_accel, 15);
       bool violation = longitudinal_accel_checks(desired_accel, TOYOTA_TSS3_LONG_LIMITS);
+      tx = !violation;
+    }
 
-      int desired_steer = (msg->data[22] << 8U) | msg->data[23];
-      desired_steer = to_signed(desired_steer, 16);
+    // 0x1A0 ADAS_STEER_COMMAND: STEER_ANGLE_CMD byte 11-12 (16-bit signed BE), STEER_REQUEST
+    // byte 6 bit 6. Absolute angle + per-frame rate limited while controls are allowed; when
+    // not allowed, only STEER_REQUEST-off frames may pass. A passing frame arms the camera
+    // relay block so the stock 0x1A0 stops reaching the EPS while openpilot is steering.
+    if (toyota_tss3 && (msg->addr == 0x1A0U)) {
+      int desired_angle = (msg->data[11] << 8U) | msg->data[12];
+      desired_angle = to_signed(desired_angle, 16);
+      bool steer_req = (msg->data[6] & 0x40U) != 0U;
+      bool violation = false;
       if (controls_allowed) {
-        if (tss3_steer_angle_inited && (SAFETY_ABS(desired_steer - tss3_last_steer_angle) > TOYOTA_TSS3_MAX_STEER_DELTA)) {
+        if (SAFETY_ABS(desired_angle) > TOYOTA_TSS3_1A0_MAX_ANGLE) {
+          violation = true;
+        }
+        if (tss3_1a0_angle_inited && (SAFETY_ABS(desired_angle - tss3_1a0_last_angle) > TOYOTA_TSS3_1A0_MAX_DELTA)) {
           violation = true;
         }
         if (!violation) {
-          tss3_steer_angle_inited = true;
-          tss3_last_steer_angle = desired_steer;
+          tss3_1a0_angle_inited = true;
+          tss3_1a0_last_angle = desired_angle;
         }
+      } else {
+        // not allowed to actively steer: STEER_REQUEST must be off
+        if (steer_req) {
+          violation = true;
+        }
+        tss3_1a0_angle_inited = false;
+      }
+      if (!violation) {
+        tss3_1a0_relay_block = TOYOTA_TSS3_1A0_RELAY_BLOCK_FRAMES;
       }
       tx = !violation;
     }
@@ -649,6 +677,15 @@ static bool toyota_fwd_hook(int bus_num, int addr) {
     // receiving it. (The DRCC/"System Malfunction" fault came from openpilot corrupting
     // 0x160 steer bytes, since fixed by routing lateral to 0x1A0 -- not from this relay.)
     block_msg = get_longitudinal_allowed();
+  }
+  if (toyota_tss3 && (bus_num == 2) && (addr == 0x1A0)) {
+    // Block the camera's 0x1A0 relay only while openpilot is actively sending its own (the
+    // tx hook arms tss3_1a0_relay_block on each accepted frame). Otherwise let stock LTA
+    // through. Self-expiring so the camera resumes shortly after openpilot stops steering.
+    if (tss3_1a0_relay_block > 0) {
+      tss3_1a0_relay_block--;
+      block_msg = true;
+    }
   }
   if (bus_num == 2) {
     block_msg |= (addr == 0x344) && ((alternative_experience & ALT_EXP_ALLOW_AEB) != 0) &&

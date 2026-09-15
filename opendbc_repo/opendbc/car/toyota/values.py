@@ -673,9 +673,13 @@ class TSS3LatMode:
 # These modes are evaluated only for the explicitly selected TSS3 platform.
 # The panda TSS3 safety flag supplies the independent tx/rx allowlist gate.
 TSS3_LONG_MODE = TSS3LongMode.LIVE
-TSS3_LAT_MODE = TSS3LatMode.LIVE
+# Lateral goes out on 0x1A0 (ADAS_STEER_COMMAND). SHADOW sends well-formed frames with
+# STEER_REQUEST off (no steering) so a drive can confirm the car accepts them and the
+# commanded angle direction is right, before flipping to LIVE. Start fail-closed in SHADOW.
+TSS3_LAT_MODE = TSS3LatMode.SHADOW
 TSS3_LAT_RELAY_ONLY = False
-TSS3_MAX_STEER_ANGLE = 55.0
+TSS3_MAX_STEER_ANGLE = 15.0        # deg steering-wheel authority cap (stock LTA ~17 deg observed)
+TSS3_MAX_STEER_ANGLE_RATE = 1.5    # deg per 0x1A0 frame (~30 deg/s at 20 Hz); panda enforces its own cap
 TSS3_MIN_OVERRIDE_SPEED = 0.45
 TSS3_PT_BUS = 1
 

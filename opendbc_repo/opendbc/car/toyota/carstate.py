@@ -97,6 +97,7 @@ class CarState(CarStateBase):
 
     self.tss3_accel_template: bytes | None = None
     self.tss3_camera_accel = 0.0
+    self.tss3_steer_template: bytes | None = None
 
   def update(self, can_parsers, starpilot_toggles) -> structs.CarState:
     if self.CP.flags & ToyotaFlags.CAN_FD.value:
@@ -350,8 +351,11 @@ class CarState(CarStateBase):
       adas = cp_cam.vl["ADAS_ACC_REQUEST"]
       self.tss3_accel_template = bytes(int(adas[f"BYTE{k:02d}"]) & 0xFF for k in range(32))
       self.tss3_camera_accel = float(adas["ACCEL_REQ"])
+      steer = cp_cam.vl["ADAS_STEER_COMMAND"]
+      self.tss3_steer_template = bytes(int(steer[f"BYTE{k:02d}"]) & 0xFF for k in range(48))
     else:
       self.tss3_accel_template = None
+      self.tss3_steer_template = None
 
     return ret, fp_ret
 
@@ -374,7 +378,7 @@ class CarState(CarStateBase):
       ]
       return {
         Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, TSS3_PT_BUS),
-        Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [("ADAS_ACC_REQUEST", 40)], 2),
+        Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [("ADAS_ACC_REQUEST", 40), ("ADAS_STEER_COMMAND", 20)], 2),
       }
 
     pt_messages = [
