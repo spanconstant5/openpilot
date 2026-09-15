@@ -672,7 +672,7 @@ class LatMode:
 
 # These modes are evaluated only for the explicitly selected  platform.
 # The panda  safety flag supplies the independent tx/rx allowlist gate.
-_LONG_MODE = TSS3LongMode.LIVE
+TSS3_LONG_MODE = TSS3LongMode.LIVE
 # Lateral goes out on 0x1A0 (ADAS_STEER_COMMAND). SHADOW sends well-formed frames with
 # STEER_REQUEST off (no steering) so a drive can confirm the car accepts them and the
 # commanded angle direction is right, before flipping to LIVE. Start fail-closed in SHADOW.
