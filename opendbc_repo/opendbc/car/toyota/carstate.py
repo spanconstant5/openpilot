@@ -60,7 +60,9 @@ class CarState(CarStateBase):
     self.cluster_speed_hyst_gap = CV.KPH_TO_MS / 2.
     self.cluster_min_speed = CV.KPH_TO_MS / 2.
 
-    if CP.flags & ToyotaFlags.SECOC.value and not CP.flags & ToyotaFlags.CAN_FD.value:
+    if CP.flags & ToyotaFlags.CAN_FD.value:
+      self.shifter_values = can_define.dv["GEAR_PACKET_2"]["GEAR"]
+    elif CP.flags & ToyotaFlags.SECOC.value:
       self.shifter_values = can_define.dv["GEAR_PACKET_HYBRID"]["GEAR"]
     else:
       self.shifter_values = can_define.dv["GEAR_PACKET"]["GEAR"]
@@ -327,7 +329,7 @@ class CarState(CarStateBase):
     ret.steeringPressed = False
     ret.brakePressed = cp.vl["BRAKE_MODULE"]["BRAKE_PRESSED"] != 0
     ret.gasPressed = cp.vl["GAS_PEDAL"]["GAS_PEDAL_USER"] != 0
-    ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(int(cp.vl["GEAR_PACKET"]["GEAR"]), None))
+    ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(int(cp.vl["GEAR_PACKET_2"]["GEAR"]), None))
 
     acc_state = int(cp.vl["STEER_ANGLE_ACC_STATUS"]["ACC_STATE"])
     ret.cruiseState.available = acc_state != 0
@@ -364,6 +366,7 @@ class CarState(CarStateBase):
         ("STEER_TORQUE_SENSOR", float('nan')),
         ("BRAKE_MODULE", 50),
         ("GEAR_PACKET", float('nan')),
+        ("GEAR_PACKET_2", float('nan')),
         ("SECOC_SYNCHRONIZATION", 10),
         ("ACC_CONTROL", 20),
         ("GAS_PEDAL", 42),
@@ -397,3 +400,4 @@ class CarState(CarStateBase):
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, 0),
       Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], cam_messages, 2),
     }
+
