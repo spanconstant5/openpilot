@@ -644,7 +644,11 @@ static safety_config toyota_init(uint16_t param) {
 static bool toyota_fwd_hook(int bus_num, int addr) {
   bool block_msg = false;
   if (toyota_tss3 && (bus_num == 2) && (addr == 0x160)) {
-    block_msg = true;  // always block: openpilot always injects its own 0x160 on bus 0
+    // Block the camera's 0x160 relay only while openpilot is injecting its own (long
+    // controlling). When disengaged, let the camera's 0x160 through so the ACC ECU keeps
+    // receiving it. (The DRCC/"System Malfunction" fault came from openpilot corrupting
+    // 0x160 steer bytes, since fixed by routing lateral to 0x1A0 -- not from this relay.)
+    block_msg = get_longitudinal_allowed();
   }
   if (bus_num == 2) {
     block_msg |= (addr == 0x344) && ((alternative_experience & ALT_EXP_ALLOW_AEB) != 0) &&
