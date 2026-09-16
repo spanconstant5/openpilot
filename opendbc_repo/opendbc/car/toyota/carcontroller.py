@@ -348,11 +348,10 @@ class CarController(CarControllerBase):
     can_sends = []
 
     if self.CP.flags & ToyotaFlags.CAN_FD.value:
-      # openpilot is the SOLE sender of 0x160 and 0x1A0 on bus 0 (the panda statically blocks
-      # the camera's copies). So we forward the camera frame every cycle, substituting only the
-      # field we actively control -- otherwise the ECUs lose the message and the panda trips
-      # relayMalfunction -> noOutput. Commanding is gated on CC.enabled so we never assert a
-      # request while openpilot is not engaged.
+      # openpilot stays PASSIVE unless actively controlling: the camera's 0x160/0x1A0 flow to the
+      # car unblocked (so DRCC/AEB and stock functions keep working), and openpilot injects its own
+      # 0x160 only while long-controlling and 0x1A0 only while lat-commanding. Nothing is asserted
+      # while disengaged / on normal cruise.
       template = CS.tss3_accel_template
       steer_template = CS.tss3_steer_template
       cam_counter = template[2] if template is not None else None
@@ -367,35 +366,29 @@ class CarController(CarControllerBase):
       applied_accel = 0.0
       applied_angle = 0.0
 
-      # *** longitudinal: 0x160 ADAS_ACC_REQUEST *** substitute accel only while controlling.
-      if template is not None and cam_counter != self.tss3_last_cam_counter:
-        if long_controlling:
-          applied_accel = float(np.clip(actuators.accel, -1.5, 1.5))
-          accel = applied_accel
-        else:
-          accel = None  # forward the camera's accel unchanged
-        can_sends.append(toyotacan.modify_tss3_160(template, accel, cam_counter))
+      # *** longitudinal: 0x160 *** inject ONLY while long-controlling (else leave the camera's alone).
+      if long_controlling and template is not None and cam_counter != self.tss3_last_cam_counter:
+        applied_accel = float(np.clip(actuators.accel, -1.5, 1.5))
+        can_sends.append(toyotacan.modify_tss3_160(template, applied_accel, cam_counter))
+        self.tss3_last_cam_counter = cam_counter
+      elif not long_controlling:
         self.tss3_last_cam_counter = cam_counter
 
-      # *** lateral: 0x1A0 ADAS_STEER_COMMAND *** substitute STEER_ANGLE_CMD (byte 11-12) and
-      # STEER_REQUEST only while commanding. Angle capped at TSS3_MAX_STEER_ANGLE and slewed at
-      # TSS3_MAX_STEER_ANGLE_RATE (panda enforces its own caps). SHADOW computes the angle but
-      # keeps STEER_REQUEST off (no steering); LIVE asserts it. Same sign as measured STEER_ANGLE.
-      if steer_template is not None and steer_counter != self.tss3_last_steer_counter:
-        if lat_commanding:
-          target = float(np.clip(actuators.steeringAngleDeg, -TSS3_MAX_STEER_ANGLE, TSS3_MAX_STEER_ANGLE))
-          self.tss3_applied_angle = float(np.clip(target,
-                                                  self.tss3_applied_angle - TSS3_MAX_STEER_ANGLE_RATE,
-                                                  self.tss3_applied_angle + TSS3_MAX_STEER_ANGLE_RATE))
-          applied_angle = self.tss3_applied_angle
-          angle = applied_angle
-          steer_req = TSS3_LAT_MODE == TSS3LatMode.LIVE
-        else:
-          angle = None  # forward the camera's steer angle unchanged, request off
-          steer_req = False
-          self.tss3_applied_angle = float(CS.out.steeringAngleDeg)
-        can_sends.append(toyotacan.modify_1a0(steer_template, angle, steer_req))
+      # *** lateral: 0x1A0 *** inject ONLY while lat-commanding. Angle capped at TSS3_MAX_STEER_ANGLE
+      # and slewed at TSS3_MAX_STEER_ANGLE_RATE (panda enforces its own caps). SHADOW keeps
+      # STEER_REQUEST off (no steering); LIVE asserts it. Same sign as measured STEER_ANGLE.
+      if lat_commanding and steer_template is not None and steer_counter != self.tss3_last_steer_counter:
+        target = float(np.clip(actuators.steeringAngleDeg, -TSS3_MAX_STEER_ANGLE, TSS3_MAX_STEER_ANGLE))
+        self.tss3_applied_angle = float(np.clip(target,
+                                                self.tss3_applied_angle - TSS3_MAX_STEER_ANGLE_RATE,
+                                                self.tss3_applied_angle + TSS3_MAX_STEER_ANGLE_RATE))
+        applied_angle = self.tss3_applied_angle
+        steer_req = TSS3_LAT_MODE == TSS3LatMode.LIVE
+        can_sends.append(toyotacan.modify_1a0(steer_template, applied_angle, steer_req))
         self.tss3_last_steer_counter = steer_counter
+      elif not lat_commanding:
+        self.tss3_last_steer_counter = steer_counter
+        self.tss3_applied_angle = float(CS.out.steeringAngleDeg)
 
       new_actuators = actuators.as_builder()
       new_actuators.steeringAngleDeg = applied_angle
