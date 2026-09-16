@@ -669,12 +669,9 @@ static safety_config toyota_init(uint16_t param) {
 static bool toyota_fwd_hook(int bus_num, int addr) {
   bool block_msg = false;
   // 0x160 and 0x1A0 are NOT check_relay (their relayed copies legitimately appear on bus 0 and
-  // false-trip stock_ecu_check -> relayMalfunction -> noOutput). Instead, block the camera's
-  // copies here unconditionally: openpilot is the continuous sole sender of both on bus 0 (it
-  // forwards the camera content every frame, substituting accel/steer only when controlling).
-  if (toyota_tss3 && (bus_num == 2) && ((addr == 0x160) || (addr == 0x1A0))) {
-    block_msg = true;
-  }
+  // false-trip stock_ecu_check -> relayMalfunction). We also do NOT block the camera's copies:
+  // the car's DRCC/AEB depend on the camera's 0x160 at full rate, so let it (and 0x1A0) flow.
+  // openpilot injects its own 0x160/0x1A0 only while actively controlling.
   if (bus_num == 2) {
     block_msg |= (addr == 0x344) && ((alternative_experience & ALT_EXP_ALLOW_AEB) != 0) &&
                  !vehicle_moving && !gas_pressed && acc_main_on;
