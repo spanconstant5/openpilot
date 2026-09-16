@@ -55,7 +55,7 @@ jobs:
                   break
               cr = data[i + 12]
               print("0x160 bus=0 len=32 check_relay=" + str(cr) + " at 0x" + format(i, "X"))
-              if cr == 1:
+      
                   found = True
               i += 1
           if found:
