@@ -689,7 +689,7 @@ TSS3_LONG_MODE = TSS3LongMode.LIVE
 TSS3_LAT_MODE = TSS3LatMode.LIVE
 TSS3_LAT_RELAY_ONLY = False
 TSS3_MAX_STEER_ANGLE = 50.0        # deg steering-wheel authority cap (stock LTA ~17 deg observed)
-TSS3_MAX_STEER_ANGLE_RATE = 1.5    # deg per 0x1A0 frame (~30 deg/s at 20 Hz); panda enforces its own cap
+TSS3_MAX_STEER_ANGLE_RATE = 5    # deg per 0x1A0 frame (~30 deg/s at 20 Hz); panda enforces its own cap
 TSS3_MIN_OVERRIDE_SPEED = 0.45
 TSS3_PT_BUS = 1
 
