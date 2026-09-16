@@ -49,8 +49,8 @@
   {0x183, 0, 8, .check_relay = true},  /* ACC_CONTROL_2 */ \
 
 #define TOYOTA_TSS3_TX_MSGS \
-  {0x160, 0, 32, .check_relay = true}, \
-  {0x1A0, 0, 48, .check_relay = true}, \
+  {0x160, 0, 32, .check_relay = false}, \
+  {0x1A0, 0, 48, .check_relay = false}, \
 
 #define TOYOTA_COMMON_RX_CHECKS(lta)                                                                                                       \
   {.msg = {{ 0xaa, 0, 8, 83U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
@@ -668,10 +668,13 @@ static safety_config toyota_init(uint16_t param) {
 
 static bool toyota_fwd_hook(int bus_num, int addr) {
   bool block_msg = false;
-  // 0x160 and 0x1A0 are check_relay TX msgs with static blocking enabled, so the safety
-  // core already blocks the camera's copies from bus 2 -> bus 0. openpilot is the sole sender
-  // of both on bus 0 (it forwards the camera content every frame, substituting accel/steer
-  // only when controlling), which is what keeps the panda out of relayMalfunction/noOutput.
+  // 0x160 and 0x1A0 are NOT check_relay (their relayed copies legitimately appear on bus 0 and
+  // false-trip stock_ecu_check -> relayMalfunction -> noOutput). Instead, block the camera's
+  // copies here unconditionally: openpilot is the continuous sole sender of both on bus 0 (it
+  // forwards the camera content every frame, substituting accel/steer only when controlling).
+  if (toyota_tss3 && (bus_num == 2) && ((addr == 0x160) || (addr == 0x1A0))) {
+    block_msg = true;
+  }
   if (bus_num == 2) {
     block_msg |= (addr == 0x344) && ((alternative_experience & ALT_EXP_ALLOW_AEB) != 0) &&
                  !vehicle_moving && !gas_pressed && acc_main_on;
