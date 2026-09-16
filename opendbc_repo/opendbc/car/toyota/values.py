@@ -677,7 +677,7 @@ TSS3_LONG_MODE = TSS3LongMode.LIVE
 # the EPS acts on the command, capped at TSS3_MAX_STEER_ANGLE (15 deg) and rate-limited; the
 # panda enforces its own independent caps. SHADOW sends the same frames with STEER_REQUEST off
 # (no steering) for validation.
-TSS3_LAT_MODE = TSS3LatMode.LIVE
+TSS3_LAT_MODE = TSS3LatMode.SHADOW
 TSS3_LAT_RELAY_ONLY = False
 TSS3_MAX_STEER_ANGLE = 15.0        # deg steering-wheel authority cap (stock LTA ~17 deg observed)
 TSS3_MAX_STEER_ANGLE_RATE = 1.5    # deg per 0x1A0 frame (~30 deg/s at 20 Hz); panda enforces its own cap
