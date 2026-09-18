@@ -218,7 +218,7 @@ class CarInterface(CarInterfaceBase):
       ret.alphaLongitudinalAvailable = True
       ret.openpilotLongitudinalControl = TSS3_LONG_MODE != TSS3LongMode.OFF
       ret.autoResumeSng = False
-      ret.minEnableSpeed = MIN_ACC_SPEED
+      ret.minEnableSpeed = -1.
       ret.steerControlType = SteerControlType.angle
       ret.lateralTuning.init('pid')
 
