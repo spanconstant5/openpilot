@@ -693,8 +693,8 @@ TSS3_LONG_MODE = TSS3LongMode.LIVE
 # line to TSS3LatMode.LIVE and ramp TSS3_MAX_STEER_ANGLE up from 15 deg. Do NOT go LIVE at 50 deg first.
 TSS3_LAT_MODE = TSS3LatMode.LIVE  # set back to SHADOW: this is the FIRST drive 0x1A0 actually emits
 TSS3_LAT_RELAY_ONLY = False
-TSS3_MAX_STEER_ANGLE = 50.0       # deg steering-wheel authority cap; raise gradually AFTER a clean LIVE low-angle test
-TSS3_MAX_STEER_ANGLE_RATE = 5    # deg per 0x1A0 frame (~30 deg/s at 20 Hz); panda enforces its own cap
+TSS3_MAX_STEER_ANGLE = 90.0       # deg steering-wheel authority cap; raise gradually AFTER a clean LIVE low-angle test
+TSS3_MAX_STEER_ANGLE_RATE = 7    # deg per 0x1A0 frame (~30 deg/s at 20 Hz); panda enforces its own cap
 TSS3_MIN_OVERRIDE_SPEED = 0.45
 TSS3_PT_BUS = 1
 
