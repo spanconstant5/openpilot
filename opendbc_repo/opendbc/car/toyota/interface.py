@@ -214,7 +214,7 @@ class CarInterface(CarInterfaceBase):
       # downstream steering path, so no openpilot SecOC key is requested.
       ret.secOcRequired = False
       ret.dashcamOnly = False
-      ret.radarUnavailable = True
+      ret.radarUnavailable = False
       ret.alphaLongitudinalAvailable = True
       ret.openpilotLongitudinalControl = TSS3_LONG_MODE != TSS3LongMode.OFF
       ret.autoResumeSng = False
