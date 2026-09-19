@@ -221,7 +221,7 @@ class CarInterface(CarInterfaceBase):
       ret.minEnableSpeed = -1.
       ret.steerControlType = SteerControlType.angle
       ret.lateralTuning.init('pid')
-
+      ret.steerActuatorDelay = 0.17  # ~150ms measured EPS lag -> earlier turn-in, less cutting wide
       tx_enabled = (TSS3_LONG_MODE == TSS3LongMode.LIVE and
                     TSS3_LAT_MODE in (TSS3LatMode.OFF, TSS3LatMode.SHADOW, TSS3LatMode.LIVE))
       if tx_enabled:
