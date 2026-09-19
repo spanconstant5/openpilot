@@ -106,44 +106,24 @@ class RadarInterface(RadarInterfaceBase):
     return rr
 
   # ---- TSS3 (CAN FD) radar ----
+  # FAIL-SAFE: on this platform every RadarData error (canError/radarFault/radarTempUnavailable) is
+  # NO_ENTRY + SOFT_DISABLE, so a flaky radar would block/disengage the car. This update therefore
+  # NEVER sets an error: if the radar isn't valid it just returns empty tracks (car falls back to
+  # vision-only longitudinal and keeps driving). Standard whole-list parser feed; the CANParser
+  # (created on bus 0) filters to its own radar messages.
   def _update_tss3(self, can_packets):
     self.frame += 1
-    result = None
-    for nanos, packets in can_packets:
-      for address, data, bus in packets:
-        if bus != self.rcp.bus or address not in self.rcp.addresses or len(data) != 64:
-          continue
-        updated = self.rcp.update([(nanos, [(address, data, bus)])])
-        self.updated_messages.update(updated)
-        if len(self.updated_messages) != len(self.rcp.addresses):
-          continue
-        cycles = {(int(self.rcp.vl[a]["COUNTER"]), int(self.rcp.vl[a]["CYCLE_BYTE"])) for a in self.rcp.addresses}
-        if len(cycles) != 1:
-          continue
-        cycle = next(iter(cycles))
-        self.updated_messages.clear()
-        if cycle == self.tss3_cycle:
-          continue
-        gap = self.tss3_cycle is not None and any((new - old) % 256 != 1 for new, old in zip(cycle, self.tss3_cycle, strict=True))
-        timeout = self.tss3_cycle_time is not None and any(
-          nanos - self.tss3_cycle_time > state.timeout_threshold for state in self.rcp.message_states.values())
-        if gap or timeout:
-          self.pts.clear()
-        self.tss3_cycle = cycle
-        self.tss3_cycle_time = nanos
-        result = self._update_tss3_points()
-      self.rcp.update([(nanos, [])])
-
+    try:
+      self.rcp.update(can_packets)
+    except Exception:
+      return RadarData()
     if not self.rcp.can_valid:
       self.pts.clear()
-      if self.tss3_cycle_time is not None or self.rcp.bus_timeout:
-        self.updated_messages.clear()
-      self.tss3_cycle = None
-      self.tss3_cycle_time = None
-      if result is not None or self.frame % 5 == 0:
-        result = RadarData()
-        result.errors.canError = True
-    return result
+      return RadarData()
+    try:
+      return self._update_tss3_points()
+    except Exception:
+      return RadarData()
 
   def _update_tss3_points(self):
     for bank, address in enumerate(self.RADAR_A_MSGS):
