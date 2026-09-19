@@ -144,7 +144,7 @@ class ToyotaSecOCPlatformConfig(PlatformConfig):
 @dataclass
 class ToyotaCanFDSecOCPlatformConfig(PlatformConfig):
   """TSS 3.0 CAN FD platform with a dedicated 32-byte powertrain DBC."""
-  dbc_dict: dict = field(default_factory=lambda: {Bus.pt: 'toyota_corolla_tss3_pt', Bus.radar: 'toyota_corolla_tss3_pt'})
+  dbc_dict: dict = field(default_factory=lambda: {Bus.pt: 'toyota_corolla_tss3_pt'})
 
   def init(self):
     self.flags |= (ToyotaFlags.HYBRID | ToyotaFlags.TSS2 | ToyotaFlags.NO_DSU |
