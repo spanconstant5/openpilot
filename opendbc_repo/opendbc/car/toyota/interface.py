@@ -214,7 +214,7 @@ class CarInterface(CarInterfaceBase):
       # downstream steering path, so no openpilot SecOC key is requested.
       ret.secOcRequired = False
       ret.dashcamOnly = False
-      ret.radarUnavailable = True  # radar reverted: 0x180-0x185 parser timed out -> canError -> Unknown Variant
+      ret.radarUnavailable = False  # radar re-enabled with fail-safe radar_interface (no NO_ENTRY on failure)
       ret.alphaLongitudinalAvailable = True
       ret.openpilotLongitudinalControl = TSS3_LONG_MODE != TSS3LongMode.OFF
       ret.autoResumeSng = False
