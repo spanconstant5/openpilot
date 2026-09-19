@@ -81,7 +81,7 @@ def get_screen_edge_color(state: UIState):
   if state.switchback_mode_enabled and lateral_active:
     return SWITCHBACK_COLOR
   if state.always_on_lateral_active:
-    return AOL_COLOR
+    return ENGAGED_COLOR
   # Keep the screen edge disengaged-blue when experimental mode is only the
   # requested longitudinal mode, not the active driving state.
   if enabled and state.conditional_status in CEM_DISABLED_OVERRIDE_STATUSES:
