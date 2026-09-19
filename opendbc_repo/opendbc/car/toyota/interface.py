@@ -217,7 +217,7 @@ class CarInterface(CarInterfaceBase):
       ret.radarUnavailable = False  # radar re-enabled with fail-safe radar_interface (no NO_ENTRY on failure)
       ret.alphaLongitudinalAvailable = True
       ret.openpilotLongitudinalControl = TSS3_LONG_MODE != TSS3LongMode.OFF
-      ret.autoResumeSng = False
+      ret.autoResumeSng = True  # stop-and-go: OP resumes automatically once rolling (>TSS3_MIN_OVERRIDE_SPEED=0.45 m/s). Dead-stop launch is still handed to the stock DRCC, so OP cannot lurch from standstill on its own.
       ret.minEnableSpeed = -1.
       ret.steerControlType = SteerControlType.angle
       ret.lateralTuning.init('pid')
