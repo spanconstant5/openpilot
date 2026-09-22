@@ -55,13 +55,26 @@ This is an offline reader; it sends nothing to the vehicle. Preserve the full
 `rlog.zst` segments for analysis: the summary counts alone cannot establish
 freshness, native MAC behavior, signer installation, EPS acceptance, or control.
 
-The next evidence gate is a complete passive route containing valid startup
-state and native `0x0B6` traffic alongside `0x00F` and `0x0D7`, with exact bus,
-length, timestamp, and payload retained in the rlogs. A stock LTA episode may
-be needed for that traffic to appear; the September 22 capture does not show
-it. If `0x0B6` is again absent, its route or operating condition remains
-unresolved. Do not infer a Corolla signer transport from Camry's `0x08A` stream
-or enable `TSS3_SIGNER`/host actuation based on message presence alone.
+The next passive-log gate is complete startup plus the request-side `0x08A`
+stream, correlated with `carState`, `0x00F`, and `0x0D7` by bus and timestamp.
+The earlier 15:39 capture could not establish whether stock LTA was active.
+Kai reports that on his **Camry**, `0x08A` runs from FRC to the vehicle motion
+controller/arbitrator, which then sends B6 to the EPS. That is a topology lead,
+not a proven Corolla route. An EPS-facing B6 may therefore be invisible in a
+Panda rlog from this harness. Native B6/MAC qualification needs an independent
+EPS-side observation or Corolla-specific signer report; do not require B6 to
+appear in the same upstream rlog. Do not enable `TSS3_SIGNER`/host actuation
+based on request-message presence alone.
+
+The later `logs 9-22 1709.zip` capture **does** close the passive startup gate:
+both routes publish Corolla `carParams`/`carState` under commit `77f01c1`, with
+the fingerprint still `fixed` and actuation still disabled. The shared DBC's
+`0x08A` `LATERAL_REQUEST_ID` is `11` (LTA/LCA) in more than 20,000 bus-2
+frames, yet `0x0B6` is absent from every recorded receive bus across 25 rlog
+segments. Thus missing B6 is not explained by a lack of LTA requests in this
+capture. Whether the Corolla motion controller emits B6 on an unobserved
+EPS-facing bus remains unresolved. The checker now
+reports the request IDs alongside B6 presence to make this distinction clear.
 
 ## CRITICAL CAVEATS — why this is not drivable yet
 

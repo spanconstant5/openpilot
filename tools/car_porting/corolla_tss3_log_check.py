@@ -49,6 +49,7 @@ def summarize_segment(messages, name: str) -> dict:
   counts = Counter()
   can_counts = Counter()
   send_counts = Counter()
+  lateral_request_ids = Counter()
   safety = Counter()
   params = []
   versions = set()
@@ -62,6 +63,9 @@ def summarize_segment(messages, name: str) -> dict:
         if frame.address in WATCH_IDS:
           key = f"0x{frame.address:03X}/bus{frame.src}/len{len(frame.dat)}"
           (can_counts if kind == "can" else send_counts)[key] += 1
+        if kind == "can" and frame.address == 0x08A and frame.src < 128 and len(frame.dat) == 32:
+          # Shared TSS3 DBC: LATERAL_REQUEST_ID is Motorola 173|6, byte 21 low six bits.
+          lateral_request_ids[f"bus{frame.src}/id{frame.dat[21] & 0x3F}"] += 1
     elif kind == "carParams":
       cp = msg.carParams
       params.append({
@@ -97,6 +101,7 @@ def summarize_segment(messages, name: str) -> dict:
     "panda_safety_samples": dict(sorted(safety.items())),
     "watched_can": dict(sorted(can_counts.items())),
     "watched_sendcan": dict(sorted(send_counts.items())),
+    "lateral_request_ids_08a": dict(sorted(lateral_request_ids.items())),
     "native_b6_rx_count": rx_b6,
     "actuation_send_count": tx_actuation,
   }
@@ -127,8 +132,11 @@ def summarize(paths: list[Path]) -> dict:
       for s in segments
     ),
     "native_b6_observed": any(s["native_b6_rx_count"] for s in segments),
+    "lta_lca_request_observed": any(
+      count > 0 for s in segments for key, count in s["lateral_request_ids_08a"].items() if key.endswith("/id11")
+    ),
     "host_actuation_observed": any(s["actuation_send_count"] for s in segments),
-    "interpretation": "Presence checks only; they do not qualify a signer or prove EPS acceptance.",
+    "interpretation": "Presence checks only. B6 may be downstream of the recorded buses; its absence here does not prove absence at the EPS or qualify a signer.",
   }
 
 
