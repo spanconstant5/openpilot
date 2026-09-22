@@ -10,6 +10,8 @@ from openpilot.selfdrive.ui.widgets.ssh_key import SshKeyFetcher
 from openpilot.selfdrive.ui.mici.layouts.settings.tss3_oracle import Tss3OracleBringupPage, tool_available
 from opendbc.car.toyota.values import CAR
 
+TSS3_ORACLE_CARS = {CAR.TOYOTA_CAMRY_TSS3, CAR.TOYOTA_COROLLA_TSS3}
+
 
 class AlphaLongConfirmPage(NavScroller):
   def __init__(self, on_confirm: Callable[[], None]):
@@ -93,9 +95,10 @@ class DeveloperLayoutMici(NavScroller):
     )
 
     self._tss3_oracle_button = BigButton(
-      "TSS3 oracle bringup", "ARM",
-      description="Exact 2026 Camry F33 only. Arm while fully OFF and in Park, then press the brake and POWER normally. " +
-                  "The native comma page stays open through RAM-oracle installation and no-reset verification."
+      "TSS3 oracle bringup", "install signer",
+      description="Install the volatile RAM-oracle on the EPS before driving. " +
+                  "Camry: arm while OFF, press brake+POWER. " +
+                  "Corolla: put car in NRTD/Park first, then tap."
     )
     self._tss3_oracle_button.set_click_callback(self._on_tss3_oracle_bringup)
 
@@ -179,9 +182,11 @@ class DeveloperLayoutMici(NavScroller):
       self._lat_maneuver_toggle.set_enabled(False)
       self._alpha_long_toggle.set_visible(False)
 
-    exact_f33 = ui_state.CP is not None and ui_state.CP.carFingerprint == CAR.TOYOTA_CAMRY_TSS3
-    oracle_available = not ui_state.is_release and exact_f33 and tool_available()
-    self._tss3_oracle_auto_toggle.set_visible(oracle_available)
+    fingerprint = ui_state.CP.carFingerprint if ui_state.CP is not None else None
+    is_tss3_oracle_car = fingerprint in TSS3_ORACLE_CARS
+    is_camry = fingerprint == CAR.TOYOTA_CAMRY_TSS3
+    oracle_available = not ui_state.is_release and is_tss3_oracle_car and tool_available()
+    self._tss3_oracle_auto_toggle.set_visible(oracle_available and is_camry)
     self._tss3_oracle_auto_toggle.set_enabled(lambda: ui_state.is_offroad() and not ui_state.engaged)
     self._tss3_oracle_button.set_visible(oracle_available)
     self._tss3_oracle_button.set_enabled(lambda: ui_state.is_offroad() and not ui_state.engaged)
@@ -191,8 +196,9 @@ class DeveloperLayoutMici(NavScroller):
       item.set_checked(ui_state.params.get_bool(key))
 
   def _on_tss3_oracle_bringup(self):
+    fingerprint = ui_state.CP.carFingerprint if ui_state.CP is not None else None
     if ui_state.is_offroad() and tool_available():
-      gui_app.push_widget(Tss3OracleBringupPage())
+      gui_app.push_widget(Tss3OracleBringupPage(fingerprint))
 
   def _on_joystick_debug_mode(self, state: bool):
     ui_state.params.put_bool("JoystickDebugMode", state, block=True)

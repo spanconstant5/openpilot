@@ -12,6 +12,7 @@ from typing import Any
 from openpilot.selfdrive.ui.ui_state import device
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, GreyBigButton
 from openpilot.system.ui.widgets.scroller import NavScroller
+from opendbc.car.toyota.values import CAR
 
 TOOL_PATH = Path(os.getenv("TSS3_ORACLE_TOOL", "/data/tss3-oracle/tss3-unified-signer"))
 RUN_ROOT = Path(os.getenv("TSS3_ORACLE_RUN_ROOT", "/data/tss3-oracle-runs"))
@@ -39,15 +40,18 @@ def oracle_bringup_active() -> bool:
 
 
 class Tss3OracleBringupPage(NavScroller):
-  """Native comma-four page for the exact-F33 RAM-oracle startup flow."""
+  """Native comma page for TSS3 RAM-oracle bringup (Camry and Corolla)."""
 
-  def __init__(self):
+  def __init__(self, fingerprint=None):
     super().__init__()
+    self._fingerprint = fingerprint
+    self._is_corolla = fingerprint == CAR.TOYOTA_COROLLA_TSS3
     self._lock = threading.Lock()
+    detail = "Put car in NRTD/Park, then tap install." if self._is_corolla else "Preparing the startup catcher."
     self._status: dict[str, Any] = {
       "stage": "arming",
-      "title": "Arming oracle bringup",
-      "detail": "Preparing the startup catcher.",
+      "title": "TSS3 oracle bringup",
+      "detail": detail,
       "progress": 0,
       "done": False,
       "error": False,
@@ -56,12 +60,14 @@ class Tss3OracleBringupPage(NavScroller):
     self._proc: subprocess.Popen[str] | None = None
     self._run_dir: Path | None = None
 
-    self._status_card = GreyBigButton("oracle bringup", "Preparing the startup catcher.")
+    self._status_card = GreyBigButton("oracle bringup", detail)
     self._progress_card = GreyBigButton("progress", "0%\nstarting")
-    self._contract_card = GreyBigButton(
-      "RAM-only startup path",
-      "No EPS flash writes.\nNo Brake/FRC resets on a healthy run.\nKeep the vehicle in Park.",
+    contract_detail = (
+      "Put car in NRTD/Park first.\nNo EPS flash writes.\nDo NOT press READY until done."
+      if self._is_corolla else
+      "No EPS flash writes.\nNo Brake/FRC resets on a healthy run.\nKeep the vehicle in Park."
     )
+    self._contract_card = GreyBigButton("RAM-only install", contract_detail)
     self._action_button = BigButton("cancel bringup", "swipe down also works")
     self._action_button.set_click_callback(self.dismiss)
 
@@ -117,7 +123,10 @@ class Tss3OracleBringupPage(NavScroller):
 
     stamp = time.strftime("%Y%m%dT%H%M%S", time.localtime())
     self._run_dir = RUN_ROOT / f"{stamp}-{os.getpid()}"
-    cmd = [str(TOOL_PATH), "--topology", "camry-post-repin", "oracle-ui-bringup", str(self._run_dir)]
+    if self._is_corolla:
+      cmd = [str(TOOL_PATH), "bringup", str(self._run_dir)]
+    else:
+      cmd = [str(TOOL_PATH), "--topology", "camry-post-repin", "oracle-ui-bringup", str(self._run_dir)]
 
     try:
       self._proc = subprocess.Popen(
