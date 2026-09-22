@@ -14,14 +14,15 @@ Adds a Corolla platform for Span's car; does **not** make the car steer or brake
 ## What this branch contains
 
 Base: `kaikozlov/openpilot@tss3` (`179df2fd4`); panda = his `tss3-openpilot`;
-opendbc submodule = `spanconstant5/opendbc@2025sop` (`b8a51e27`).
+opendbc submodule = `spanconstant5/opendbc@2025sop` (see the pinned gitlink).
 
 The `opendbc_repo` submodule **tracks kaikozlov's opendbc directly** (base mismatch
 resolved). `.gitmodules` points `opendbc_repo` at `spanconstant5/opendbc`, branch
-`2025sop` (commit `b8a51e27`), which is **kaikozlov/opendbc @ `tss3-openpilot`
+`2025sop`, which is **kaikozlov/opendbc @ `tss3-openpilot`
 (`566ab6b`, "toyota: run TSS3 request plane at 100 Hz")** plus the Span adaptation
-commit. All his files (full toyota port, `car/secoc.py`, `safety/modes/toyota.h`,
-`dbc/generator/toyota/toyota_tss3_pt.dbc`) are his originals, unmodified.
+commits. The Camry signer transport remains the upstream implementation;
+the Corolla changes are confined to its platform scaffold, torque substitute,
+and regression coverage.
 
 Span-specific adaptation (the only edits on top of his files):
 - `values.py`: added `CAR.TOYOTA_COROLLA_TSS3` platform (specs approximated from
@@ -30,18 +31,45 @@ Span-specific adaptation (the only edits on top of his files):
 - `interface.py`: Corolla branch that **holds actuation off** — `dashcamOnly=True`,
   `openpilotLongitudinalControl=False`, and the `TSS3_SIGNER`/`TSS3_08A_HOST`
   safety flags **not** asserted (panda blocks `0x08A` TX).
+- `torque_data/substitute.toml`: maps the Corolla scaffold to existing Corolla
+  TSS2 metadata. This prevents the `card` startup `KeyError` seen in the
+  September 22 logs; it is not a measured 2025 lateral limit.
 
 Control modes (as requested): **steering held (dashcamOnly), longitudinal OFF.**
 
+## Passive log evidence for the Corolla signer
+
+The September 22 archive (`logs 9-22-1539.zip`, openpilot `b063d136`) predates
+the torque-data fix. `card` identified `TOYOTA_COROLLA_TSS3` with fingerprint
+source `fixed`, then crashed before publishing `carParams` or `carState`. The
+Panda remained in `elm327`; the archive has no host control traffic. Raw CAN
+was recorded, including `0x00F`, `0x0D7`, and `0x08A`, but no native `0x0B6`.
+It cannot qualify the EPS signer or prove automatic firmware recognition.
+
+The current branch should now initialize `card` while remaining passive. For
+each later local route, `tools/car_porting/corolla_tss3_log_check.py` summarizes
+the build commit, fingerprint source, `carParams`/`carState` presence, Panda
+safety, and received versus host-sent frames on the relevant buses. It accepts
+an rlog, a directory of rlogs, or a ZIP of rlogs and writes JSON with `--output`.
+This is an offline reader; it sends nothing to the vehicle. Preserve the full
+`rlog.zst` segments for analysis: the summary counts alone cannot establish
+freshness, native MAC behavior, signer installation, EPS acceptance, or control.
+
+The next evidence gate is a complete passive route containing valid startup
+state and native `0x0B6` traffic alongside `0x00F` and `0x0D7`, with exact bus,
+length, timestamp, and payload retained in the rlogs. A stock LTA episode may
+be needed for that traffic to appear; the September 22 capture does not show
+it. If `0x0B6` is again absent, its route or operating condition remains
+unresolved. Do not infer a Corolla signer transport from Camry's `0x08A` stream
+or enable `TSS3_SIGNER`/host actuation based on message presence alone.
+
 ## CRITICAL CAVEATS — why this is not drivable yet
 
-1. **Parent openpilot ↔ opendbc compatibility (unverified).** The opendbc submodule now
-   tracks kaikozlov's opendbc wholesale (his self-consistent base — the earlier master
-   mismatch is gone). BUT the *parent* openpilot here is `origin/master`, not kaikozlov's
-   `openpilot@tss3`. His opendbc car interface may expect his openpilot changes.
-   **No build was possible in this environment**, so import/link against this openpilot
-   is unverified. If it doesn't build, base the parent on `kaikozlov/openpilot@tss3` too
-   (its opendbc pin is his branch). Python files pass `py_compile`; that is not a build.
+1. **Runtime compatibility remains unverified.** This branch is based on
+   `kaikozlov/openpilot@tss3` with the matching opendbc line; the older
+   parent/opendbc base mismatch no longer applies. A successful device build
+   and a complete passive `card` startup log are still required. Import checks
+   and a torque-table unit test do not establish runtime behavior.
 
 2. **The Corolla signer backend is NOT in this port.** `tss3.py` implements the
    **Camry-native** `0x777` host transport (native-authenticated). Span's Corolla EPS
@@ -71,7 +99,7 @@ Control modes (as requested): **steering held (dashcamOnly), longitudinal OFF.**
 
 ## Path to make it real (ordered)
 
-1. Fix the opendbc base (caveat 1) and get a clean build.
+1. Confirm the current opendbc pin, build, and complete passive `card` startup.
 2. Repin the harness (caveat 4); capture a relay-correct route to confirm bus map.
 3. Install the Corolla EPS signer (`corolla-tss3-signer`, targeting Span's F181
    `8965F1208000 / 8A3111213000` — NOT albino's) and wire a Corolla command-5 backend
