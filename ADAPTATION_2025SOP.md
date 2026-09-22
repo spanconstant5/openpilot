@@ -9,13 +9,12 @@ platform for Span's car so the code loads and can be reviewed/extended. It does
 
 Base: `origin/master` (openpilot), opendbc submodule at commaai `44c977f`.
 
-Vendored from **kaikozlov/opendbc @ `tss3-openpilot` (`566ab6b`, "toyota: run TSS3
-request plane at 100 Hz")** into `opendbc_repo/opendbc/`:
-- `car/toyota/` — `carcontroller.py`, `carstate.py`, `toyotacan.py`, `values.py`,
-  `interface.py`, `fingerprints.py`, `radar_interface.py`, `tss3.py`, `__init__.py`
-- `car/secoc.py`
-- `safety/modes/toyota.h`  (his newer path; see caveat 1)
-- `dbc/generator/toyota/toyota_tss3_pt.dbc`
+The `opendbc_repo` submodule **tracks kaikozlov's opendbc directly** (base mismatch
+resolved). `.gitmodules` points `opendbc_repo` at `spanconstant5/opendbc`, branch
+`2025sop` (commit `b8a51e27`), which is **kaikozlov/opendbc @ `tss3-openpilot`
+(`566ab6b`, "toyota: run TSS3 request plane at 100 Hz")** plus the Span adaptation
+commit. All his files (full toyota port, `car/secoc.py`, `safety/modes/toyota.h`,
+`dbc/generator/toyota/toyota_tss3_pt.dbc`) are his originals, unmodified.
 
 Span-specific adaptation (the only edits on top of his files):
 - `values.py`: added `CAR.TOYOTA_COROLLA_TSS3` platform (specs approximated from
@@ -29,13 +28,13 @@ Control modes (as requested): **steering held (dashcamOnly), longitudinal OFF.**
 
 ## CRITICAL CAVEATS — why this is not drivable yet
 
-1. **opendbc base mismatch (build blocker).** His port targets a *newer* opendbc
-   than master `44c977f`. Evidence: his safety lives at `opendbc/safety/modes/toyota.h`,
-   which master's opendbc does not have (safety hadn't moved into opendbc yet).
-   Python files pass `py_compile`, but **import/link compatibility against master's
-   opendbc core and the openpilot build was NOT verified** (no build was possible in
-   this environment). To actually build, either bump the opendbc submodule to a base
-   near his, or track `kaikozlov/opendbc@tss3-openpilot` wholesale.
+1. **Parent openpilot ↔ opendbc compatibility (unverified).** The opendbc submodule now
+   tracks kaikozlov's opendbc wholesale (his self-consistent base — the earlier master
+   mismatch is gone). BUT the *parent* openpilot here is `origin/master`, not kaikozlov's
+   `openpilot@tss3`. His opendbc car interface may expect his openpilot changes.
+   **No build was possible in this environment**, so import/link against this openpilot
+   is unverified. If it doesn't build, base the parent on `kaikozlov/openpilot@tss3` too
+   (its opendbc pin is his branch). Python files pass `py_compile`; that is not a build.
 
 2. **The Corolla signer backend is NOT in this port.** `tss3.py` implements the
    **Camry-native** `0x777` host transport (native-authenticated). Span's Corolla EPS
