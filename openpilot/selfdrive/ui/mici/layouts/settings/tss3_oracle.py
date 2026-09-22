@@ -124,7 +124,7 @@ class Tss3OracleBringupPage(NavScroller):
     stamp = time.strftime("%Y%m%dT%H%M%S", time.localtime())
     self._run_dir = RUN_ROOT / f"{stamp}-{os.getpid()}"
     if self._is_corolla:
-      cmd = [str(TOOL_PATH), "bringup", str(self._run_dir)]
+      cmd = [str(TOOL_PATH), "--topology", "camry-post-repin", "bringup", str(self._run_dir)]
     else:
       cmd = [str(TOOL_PATH), "--topology", "camry-post-repin", "oracle-ui-bringup", str(self._run_dir)]
 
