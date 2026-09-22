@@ -118,7 +118,14 @@ def summarize(paths: list[Path]) -> dict:
   return {
     "schema": "corolla-tss3-passive-log-check-v1",
     "segments": segments,
-    "startup_observed": any(s["car_params_events"] and s["car_state_events"] for s in segments),
+    "passive_corolla_startup_observed": any(
+      s["car_params"] is not None
+      and s["car_params"]["fingerprint"] == "TOYOTA_COROLLA_TSS3"
+      and s["car_params"]["passive"]
+      and s["car_params"]["dashcam_only"]
+      and s["car_state_events"] > 0
+      for s in segments
+    ),
     "native_b6_observed": any(s["native_b6_rx_count"] for s in segments),
     "host_actuation_observed": any(s["actuation_send_count"] for s in segments),
     "interpretation": "Presence checks only; they do not qualify a signer or prove EPS acceptance.",
