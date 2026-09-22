@@ -20,3 +20,10 @@ if [ -z "$AGNOS_VERSION" ]; then
 fi
 
 export STAGING_ROOT="/data/safe_staging"
+
+# 2025sop scaffold: force Span's Corolla TSS3 platform. carFw is incomplete (only the
+# EPS record is known), so auto-fingerprint won't select it. This makes the no-SSH
+# installer path work hands-off. REMOVE once full carFw is captured and fingerprinting
+# resolves on its own. Actuation is still held OFF in interface.py (dashcamOnly).
+export FINGERPRINT="TOYOTA_COROLLA_TSS3"
+export SKIP_FW_QUERY="1"
