@@ -2,6 +2,7 @@ from opendbc.car import Bus, structs, get_safety_config, uds
 from opendbc.car.toyota.carstate import CarState
 from opendbc.car.toyota.carcontroller import CarController
 from opendbc.car.toyota.radar_interface import RadarInterface
+from opendbc.car.toyota.tss3 import TSS3_SOURCE_BUS
 from opendbc.car.toyota.values import Ecu, CAR, DBC, ToyotaFlags, CarControllerParams, TSS2_CAR, RADAR_ACC_CAR, NO_DSU_CAR, \
                                                   MIN_ACC_SPEED, EPS_SCALE, NO_STOP_TIMER_CAR, ANGLE_CONTROL_CAR, \
                                                   ToyotaFrogPilotSafetyFlags, ToyotaSafetyFlags
@@ -23,6 +24,7 @@ class CarInterface(CarInterfaceBase):
   @staticmethod
   def _get_params(ret: structs.CarParams, candidate, fingerprint, car_fw, alpha_long, is_release, docs) -> structs.CarParams:
     ret.brand = "toyota"
+
     ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.toyota)]
     ret.safetyConfigs[0].safetyParam = EPS_SCALE[candidate]
 
@@ -35,9 +37,16 @@ class CarInterface(CarInterfaceBase):
       ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.SECOC.value
       ret.dashcamOnly = is_release
 
-    if candidate in ANGLE_CONTROL_CAR:
+    if ret.flags & ToyotaFlags.TSS3:
+      # the FRC's CONTROL_REQUEST is signed by the EPS, see tss3.py
+      ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.TSS3.value
+      ret.dashcamOnly = is_release
+      ret.steerAtStandstill = True
+
+    if candidate in ANGLE_CONTROL_CAR or ret.flags & ToyotaFlags.TSS3:
       ret.steerControlType = SteerControlType.angle
-      ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.LTA.value
+      if candidate in ANGLE_CONTROL_CAR:
+        ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.LTA.value
 
       # LTA control can be more delayed and winds up more often
       ret.steerActuatorDelay = 0.18
@@ -97,12 +106,18 @@ class CarInterface(CarInterfaceBase):
     # FrogPilot variables
     if candidate in (CAR.TOYOTA_HIGHLANDER, CAR.TOYOTA_PRIUS_V, CAR.TOYOTA_RAV4H) and not docs:
       stop_and_go = True
+    elif ret.flags & ToyotaFlags.TSS3:
+      stop_and_go = True
 
     ret.centerToFront = ret.wheelbase * 0.44
 
     # TODO: Some TSS-P platforms have BSM, but are flipped based on region or driving direction.
     # Detect flipped signals and enable for C-HR and others
     ret.enableBsm = 0x3F6 in fingerprint[0] and candidate in TSS2_CAR
+    # BSM comes from the FRC on TSS3
+    if 0x3F6 in fingerprint.get(TSS3_SOURCE_BUS, {}) and ret.flags & ToyotaFlags.TSS3:
+      ret.flags |= ToyotaFlags.HAS_BSM.value
+      ret.enableBsm = True
 
     # No radar dbc for cars without DSU which are not TSS 2.0
     # TODO: make an adas dbc file for dsu-less models
@@ -116,6 +131,10 @@ class CarInterface(CarInterfaceBase):
       if alpha_long and candidate in RADAR_ACC_CAR:
         ret.flags |= ToyotaFlags.DISABLE_RADAR.value
 
+    # TSS3 longitudinal replaces the FRC's acceleration request, it is new
+    if ret.flags & ToyotaFlags.TSS3:
+      ret.alphaLongitudinalAvailable = True
+
     # openpilot longitudinal enabled by default:
     #  - cars w/ DSU disconnected
     #  - TSS2 cars with camera sending ACC_CONTROL where we can block it
@@ -123,7 +142,8 @@ class CarInterface(CarInterfaceBase):
     #  - TSS2 radar ACC cars (disables radar)
 
     ret.openpilotLongitudinalControl = (candidate in (TSS2_CAR - RADAR_ACC_CAR) or
-                                        bool(ret.flags & ToyotaFlags.DISABLE_RADAR.value))
+                                        bool(ret.flags & ToyotaFlags.DISABLE_RADAR.value) or
+                                        (bool(ret.flags & ToyotaFlags.TSS3) and alpha_long))
 
     ret.autoResumeSng = ret.openpilotLongitudinalControl and candidate in NO_STOP_TIMER_CAR
 
@@ -144,6 +164,9 @@ class CarInterface(CarInterfaceBase):
       # Hybrids have much quicker longitudinal actuator response
       if ret.flags & ToyotaFlags.HYBRID.value:
         ret.longitudinalActuatorDelay = 0.05
+
+    if ret.flags & ToyotaFlags.TSS3:
+      ret.longitudinalActuatorDelay = 0.2
 
     # FrogPilot variables
     if ret.flags & ToyotaFlags.UNSUPPORTED_DSU.value:
