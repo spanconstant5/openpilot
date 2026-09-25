@@ -8,7 +8,7 @@ from opendbc import DBC_PATH
 
 # TODO: these should just be passed in along with the DBC file
 from opendbc.car.honda.hondacan import honda_checksum
-from opendbc.car.toyota.toyotacan import toyota_checksum
+from opendbc.car.toyota.toyotacan import toyota_checksum, toyota_e2e_checksum
 from opendbc.car.subaru.subarucan import subaru_checksum
 from opendbc.car.chrysler.chryslercan import chrysler_checksum, fca_giorgio_checksum
 from opendbc.car.hyundai.hyundaicanfd import hkg_can_fd_checksum
@@ -34,6 +34,7 @@ class SignalType:
   TESLA_CHECKSUM = 11
   PSA_CHECKSUM = 12
   VOLKSWAGEN_MLB_CHECKSUM = 13
+  TOYOTA_E2E_CHECKSUM = 14
 
 
 @dataclass
@@ -177,6 +178,8 @@ class ChecksumState:
 def get_checksum_state(dbc_name: str) -> ChecksumState | None:
   if dbc_name.startswith(("honda_", "acura_")):
     return ChecksumState(4, 2, 3, 5, False, SignalType.HONDA_CHECKSUM, honda_checksum)
+  elif dbc_name.startswith("toyota_tss3_radar"):
+    return ChecksumState(16, 8, 0, 16, True, SignalType.TOYOTA_E2E_CHECKSUM, toyota_e2e_checksum)
   elif dbc_name.startswith(("toyota_", "lexus_")):
     return ChecksumState(8, -1, 7, -1, False, SignalType.TOYOTA_CHECKSUM, toyota_checksum)
   elif dbc_name.startswith("hyundai_canfd_generated"):
