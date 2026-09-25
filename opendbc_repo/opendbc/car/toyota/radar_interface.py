@@ -2,12 +2,21 @@
 from opendbc.can import CANParser
 from opendbc.car import Bus
 from opendbc.car.structs import RadarData
-from opendbc.car.toyota.values import DBC, TSS2_CAR
+from opendbc.car.toyota.values import DBC, TSS2_CAR, ToyotaFlags
 from opendbc.car.interfaces import RadarInterfaceBase
 
+TSS3_GEOMETRY_MSGS = [0x180, 0x181, 0x182]
+TSS3_MOTION_MSGS = [0x183, 0x184, 0x185]
+TSS3_SLOTS = 8
+TSS3_DIST_INVALID = 0xFFF8 * 0.005
 
-def _create_radar_can_parser(car_fingerprint):
-  if car_fingerprint in TSS2_CAR:
+
+def _create_radar_can_parser(CP):
+  if CP.flags & ToyotaFlags.TSS3:
+    messages = [(msg, 20) for msg in TSS3_GEOMETRY_MSGS + TSS3_MOTION_MSGS]
+    return CANParser(DBC[CP.carFingerprint][Bus.radar], messages, 1)
+
+  if CP.carFingerprint in TSS2_CAR:
     RADAR_A_MSGS = list(range(0x180, 0x190))
     RADAR_B_MSGS = list(range(0x190, 0x1a0))
   else:
@@ -18,7 +27,7 @@ def _create_radar_can_parser(car_fingerprint):
   msg_b_n = len(RADAR_B_MSGS)
   messages = list(zip(RADAR_A_MSGS + RADAR_B_MSGS, [20] * (msg_a_n + msg_b_n), strict=True))
 
-  return CANParser(DBC[car_fingerprint][Bus.radar], messages, 1)
+  return CANParser(DBC[CP.carFingerprint][Bus.radar], messages, 1)
 
 
 class RadarInterface(RadarInterfaceBase):
@@ -26,17 +35,20 @@ class RadarInterface(RadarInterfaceBase):
     super().__init__(CP)
     self.track_id = 0
 
-    if CP.carFingerprint in TSS2_CAR:
-      self.RADAR_A_MSGS = list(range(0x180, 0x190))
-      self.RADAR_B_MSGS = list(range(0x190, 0x1a0))
+    if CP.flags & ToyotaFlags.TSS3:
+      self.trigger_msg = TSS3_MOTION_MSGS[-1]
     else:
-      self.RADAR_A_MSGS = list(range(0x210, 0x220))
-      self.RADAR_B_MSGS = list(range(0x220, 0x230))
+      if CP.carFingerprint in TSS2_CAR:
+        self.RADAR_A_MSGS = list(range(0x180, 0x190))
+        self.RADAR_B_MSGS = list(range(0x190, 0x1a0))
+      else:
+        self.RADAR_A_MSGS = list(range(0x210, 0x220))
+        self.RADAR_B_MSGS = list(range(0x220, 0x230))
 
-    self.valid_cnt = {key: 0 for key in self.RADAR_A_MSGS}
+      self.valid_cnt = {key: 0 for key in self.RADAR_A_MSGS}
+      self.trigger_msg = self.RADAR_B_MSGS[-1]
 
-    self.rcp = None if CP.radarUnavailable else _create_radar_can_parser(CP.carFingerprint)
-    self.trigger_msg = self.RADAR_B_MSGS[-1]
+    self.rcp = None if CP.radarUnavailable else _create_radar_can_parser(CP)
     self.updated_messages = set()
 
   def update(self, can_strings):
@@ -58,6 +70,11 @@ class RadarInterface(RadarInterfaceBase):
     ret = RadarData()
     if not self.rcp.can_valid:
       ret.errors.canError = True
+
+    if self.CP.flags & ToyotaFlags.TSS3:
+      self._update_tss3_points(ret.errors.canError)
+      ret.points = list(self.pts.values())
+      return ret
 
     for ii in sorted(updated_messages):
       if ii in self.RADAR_A_MSGS:
@@ -91,3 +108,32 @@ class RadarInterface(RadarInterfaceBase):
 
     ret.points = list(self.pts.values())
     return ret
+
+  def _update_tss3_points(self, can_error):
+    if can_error:
+      self.pts.clear()
+      return
+
+    for bank, (geometry_addr, motion_addr) in enumerate(zip(TSS3_GEOMETRY_MSGS, TSS3_MOTION_MSGS, strict=True)):
+      geometry, motion = self.rcp.vl[geometry_addr], self.rcp.vl[motion_addr]
+      for slot in range(TSS3_SLOTS):
+        key = bank * TSS3_SLOTS + slot
+        new, ended = motion[f'NEW_TRACK_{slot}'], motion[f'TRACK_ENDED_{slot}']
+        dist = geometry[f'DIST_{slot}']
+        valid = motion[f'TRACK_STATE_{slot}'] != 0 and 0 < dist < TSS3_DIST_INVALID and (new or not ended)
+
+        if new or ended or not valid:
+          self.pts.pop(key, None)
+        if not valid:
+          continue
+
+        if key not in self.pts:
+          self.pts[key] = RadarData.RadarPoint()
+          self.pts[key].trackId = self.track_id
+          self.track_id += 1
+        self.pts[key].dRel = dist
+        self.pts[key].yRel = geometry[f'LAT_{slot}']
+        self.pts[key].vRel = motion[f'VREL_{slot}']
+        self.pts[key].aRel = float('nan')
+        self.pts[key].yvRel = float('nan')
+        self.pts[key].measured = True
