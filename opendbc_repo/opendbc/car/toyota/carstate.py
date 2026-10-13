@@ -49,10 +49,11 @@ class CarState(CarStateBase):
     self.cluster_speed_hyst_gap = CV.KPH_TO_MS / 2.
     self.cluster_min_speed = CV.KPH_TO_MS / 2.
 
-    if CP.flags & (ToyotaFlags.SECOC | ToyotaFlags.TSS3):
-      self.shifter_values = can_define.dv["GEAR_PACKET_HYBRID"]["GEAR"]
+    if CP.flags & ToyotaFlags.SECOC or (CP.flags & ToyotaFlags.TSS3 and CP.flags & ToyotaFlags.HYBRID):
+      self.gear_message = "GEAR_PACKET_HYBRID"
     else:
-      self.shifter_values = can_define.dv["GEAR_PACKET"]["GEAR"]
+      self.gear_message = "GEAR_PACKET"
+    self.shifter_values = can_define.dv[self.gear_message]["GEAR"]
 
     # On cars with cp.vl["STEER_TORQUE_SENSOR"]["STEER_ANGLE"]
     # the signal is zeroed to where the steering angle is at start.
@@ -120,7 +121,7 @@ class CarState(CarStateBase):
     ret.steeringAngleDeg = cp.vl["STEER_ANGLE_SENSOR"]["STEER_ANGLE"] + cp.vl["STEER_ANGLE_SENSOR"]["STEER_FRACTION"]
     ret.steeringRateDeg = cp.vl["STEER_ANGLE_SENSOR"]["STEER_RATE"]
     ret.carNotReady = cp.vl["READY_STATUS"]["READY_STATUS"] == 0
-    ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(int(cp.vl["GEAR_PACKET_HYBRID"]["GEAR"]), None))
+    ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(int(cp.vl[self.gear_message]["GEAR"]), None))
 
     ret.leftBlinker = cp.vl["BLINKERS_STATE"]["TURN_SIGNALS"] == 1
     ret.rightBlinker = cp.vl["BLINKERS_STATE"]["TURN_SIGNALS"] == 2
@@ -143,24 +144,26 @@ class CarState(CarStateBase):
       ret.leftBlindspot = bool(cp_cam.vl["BSM"]["L_ADJACENT"] or cp_cam.vl["BSM"]["L_APPROACHING"])
       ret.rightBlindspot = bool(cp_cam.vl["BSM"]["R_ADJACENT"] or cp_cam.vl["BSM"]["R_APPROACHING"])
 
-    switch = cp.vl["CRUISE_BUTTONS"]
-    previous_button = self.tss3_cruise_button
-    if switch["CANCEL_BUTTON"] and not switch["CANCEL_BUTTON_MIRROR_N"]:
-      self.tss3_cruise_button = 1
-    elif switch["SET_BUTTON"] and not switch["SET_BUTTON_MIRROR_N"]:
-      self.tss3_cruise_button = 2
-    elif switch["RES_BUTTON"] and not switch["RES_BUTTON_MIRROR_N"]:
-      self.tss3_cruise_button = 3
-    elif switch["MAIN_BUTTON"]:
-      self.tss3_cruise_button = 4
-    else:
-      self.tss3_cruise_button = 0
-    button_events = create_button_events(self.tss3_cruise_button, previous_button, {
-      1: ButtonType.cancel,
-      2: ButtonType.decelCruise,
-      3: ButtonType.accelCruise,
-      4: ButtonType.mainCruise,
-    })
+    button_events = []
+    if self.CP.flags & ToyotaFlags.HYBRID:
+      switch = cp.vl["CRUISE_BUTTONS"]
+      previous_button = self.tss3_cruise_button
+      if switch["CANCEL_BUTTON"] and not switch["CANCEL_BUTTON_MIRROR_N"]:
+        self.tss3_cruise_button = 1
+      elif switch["SET_BUTTON"] and not switch["SET_BUTTON_MIRROR_N"]:
+        self.tss3_cruise_button = 2
+      elif switch["RES_BUTTON"] and not switch["RES_BUTTON_MIRROR_N"]:
+        self.tss3_cruise_button = 3
+      elif switch["MAIN_BUTTON"]:
+        self.tss3_cruise_button = 4
+      else:
+        self.tss3_cruise_button = 0
+      button_events = create_button_events(self.tss3_cruise_button, previous_button, {
+        1: ButtonType.cancel,
+        2: ButtonType.decelCruise,
+        3: ButtonType.accelCruise,
+        4: ButtonType.mainCruise,
+      })
 
     prev_distance = self.pcm_follow_distance
     self.pcm_follow_distance = cp_cam.vl["CRUISE_DISPLAY"]["SET_VEHICLE_INTERVAL_TIME"]
@@ -419,8 +422,7 @@ class CarState(CarStateBase):
       ("WHEEL_SPEEDS", 100),
       ("BRAKE_MODULE", 50),
       ("GAS_PEDAL", 40),
-      ("GEAR_PACKET_HYBRID", 50),
-      ("CRUISE_BUTTONS", 30),
+      ("GEAR_PACKET_HYBRID", 50) if CP.flags & ToyotaFlags.HYBRID else ("GEAR_PACKET", 1),
       ("READY_STATUS", 1),
       ("ESP_CONTROL", 3),
       ("BLINKERS_STATE", 1),
@@ -430,6 +432,9 @@ class CarState(CarStateBase):
       ("LIGHT_STALK", 1),
       ("SIGNER_RESPONSE", float('nan')),
     ]
+    # ICE Corolla has no observed 0xFE; its 0x24D button semantics remain unmapped.
+    if CP.flags & ToyotaFlags.HYBRID:
+      pt_messages.append(("CRUISE_BUTTONS", 30))
     cam_messages = [
       ("CONTROL_REQUEST", 40),
       ("CRUISE_DISPLAY", 1),

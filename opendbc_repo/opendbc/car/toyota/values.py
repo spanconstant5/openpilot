@@ -259,6 +259,13 @@ class CAR(Platforms):
     ],
     CarSpecs(mass=3060. * CV.LB_TO_KG, wheelbase=2.67, steerRatio=13.9, tireStiffnessFactor=0.444),
   )
+  TOYOTA_COROLLA_TSS3 = ToyotaTSS3PlatformConfig(
+    [
+      ToyotaTSS3CarDocs("Toyota Corolla 2023"),
+      ToyotaTSS3CarDocs("Toyota Corolla Hybrid 2025"),
+    ],
+    CarSpecs(wheelbase=2.70, steerRatio=13.9, tireStiffnessFactor=0.444),
+  )
   TOYOTA_HIGHLANDER = PlatformConfig(
     [
       ToyotaCarDocs("Toyota Highlander 2017-19", video="https://www.youtube.com/watch?v=0wS0wXSLzoo"),
