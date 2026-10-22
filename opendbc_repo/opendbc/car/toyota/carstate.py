@@ -181,6 +181,7 @@ class CarState(CarStateBase):
     ret.cruiseState.enabled = bool(request["CRUISE_OPERATING_LATCH"])
     ret.cruiseState.standstill = ret.cruiseState.enabled and bool(request["DELAYED_HOLD_STATE"])
     ret.cruiseState.available = bool(cp_cam.vl["CRUISE_DISPLAY"]["CRUISE_MAIN_STATE"])
+    ret.cruiseState.nonAdaptive = cp_cam.vl["CRUISE_STATUS"]["CRUISE_MODE"] == 2
     ret.cruiseState.speed = request["SET_SPEED"] * CV.KPH_TO_MS
     cluster_set_speed = cp_cam.vl["CRUISE_DISPLAY"]["UI_SET_SPEED"]
     if ret.cruiseState.speed != 0 and cluster_set_speed > 0:
@@ -430,6 +431,7 @@ class CarState(CarStateBase):
     cam_messages = [
       ("CONTROL_REQUEST", 40),
       ("CRUISE_DISPLAY", 1),
+      ("CRUISE_STATUS", 1),
       ("LKAS_HUD", 1),
     ]
     if CP.flags & ToyotaFlags.HAS_BSM:
