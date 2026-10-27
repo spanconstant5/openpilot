@@ -75,6 +75,7 @@ class CarState(CarStateBase):
     self.tss3_lkas_hud = {}
     self.tss3_stock_control_request = None
     self.tss3_signer_responses = []
+    self.tss3_signer_available = False
     self.tss3_signer_request_rejected = False
     self.tss3_control_request_rejected = False
 
@@ -92,6 +93,7 @@ class CarState(CarStateBase):
     ret = structs.CarState()
 
     # SecOC signer
+    ret.signerUnavailable = not self.tss3_signer_available
     responses = cp.vl_all["SIGNER_RESPONSE"]
     self.tss3_signer_responses = [{sig: vals[i] for sig, vals in responses.items()} for i in range(len(responses["SIGNER_SEQUENCE"]))]
     self.tss3_stock_control_request = copy.copy(cp_cam.vl["CONTROL_REQUEST"])

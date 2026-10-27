@@ -122,6 +122,9 @@ class CarController(CarControllerBase):
     self.accel = float(np.clip(actuators.accel, self.params.ACCEL_MIN, self.params.ACCEL_MAX)) if long_active else 0.0
 
     can_sends.extend(self.signer.send(CS, CC.enabled, lat_active, self.last_angle, long_active, self.accel, now_nanos))
+    if not CC.enabled and self.frame % 100 == 0:
+      can_sends.extend(self.signer.probe(CS, self.last_angle, now_nanos))
+    CS.tss3_signer_available = self.signer.available
 
     if CC.cruiseControl.cancel:
       can_sends.append(toyotacan.create_tss3_brake_cancel_command(self.packer, CS.tss3_brake_module, TSS3_SOURCE_BUS))

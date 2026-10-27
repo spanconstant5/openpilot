@@ -1,4 +1,5 @@
 """Signs CONTROL_REQUEST (0x08A) through the EPS-resident SecOC signer."""
+
 from collections import OrderedDict
 from dataclasses import dataclass
 
@@ -57,6 +58,9 @@ class SignerTransport:
     self.started_ns = 0
     self.last_publish_ns = 0
     self.last_publish_sequence: int | None = None
+    self.available = False
+    self.probe_sequence: int | None = None
+    self.last_probe_ns = 0
 
   def _release(self, sends: list[CanData], reason: str | None = None) -> None:
     if reason is not None:
@@ -73,13 +77,22 @@ class SignerTransport:
     """Process the signer responses and panda rejections from this frame's CAN."""
     sends: list[CanData] = []
     self.request_rejected |= CS.tss3_signer_request_rejected
+    if enabled:
+      self.probe_sequence = None
     if CS.tss3_control_request_rejected and self.active:
       # panda forwards the FRC's CONTROL_REQUEST again, re-arm with the next signed request
       self._release(sends, "control_request_rejected")
+      self.available = False
 
     for response in CS.tss3_signer_responses:
       seq = int(response["SIGNER_SEQUENCE"])
-      if response["SERVICE_ID"] != SIGNER_SID or int(response["SIGNER_SEQUENCE_INVERTED"]) != seq ^ 0xFF or seq not in self.pending:
+      if response["SERVICE_ID"] != SIGNER_SID or int(response["SIGNER_SEQUENCE_INVERTED"]) != seq ^ 0xFF:
+        continue
+      if seq == self.probe_sequence:
+        self.available = response["STATUS"] == 0 and now_ns - self.last_probe_ns <= SIGNER_TIMEOUT_NS
+        self.probe_sequence = None
+        continue
+      if seq not in self.pending:
         continue
 
       # the signer answers in order, so earlier unanswered requests were lost
@@ -97,13 +110,31 @@ class SignerTransport:
         del self.pending[seq]
       else:
         request.trailer = {s: response[s] for s in ("MSG_CNT_LOWER", "RESET_FLAG", "AUTHENTICATOR")}
+        self.available = True
 
     if not enabled or not CS.out.canValid:
       self._release(sends)
       self.next_request_sequence = 0
     elif self.started_ns and now_ns - (self.last_publish_ns or self.started_ns) > SIGNER_TIMEOUT_NS:
       self._release(sends, "signer_timeout")
+      self.available = False
+
+    if not CS.out.canValid or (self.probe_sequence is not None and now_ns - self.last_probe_ns > SIGNER_TIMEOUT_NS):
+      self.available = False
+      self.probe_sequence = None
     return sends
+
+  def probe(self, CS, angle_deg: float, now_ns: int) -> list[CanData]:
+    """Check signing path at 1 Hz while disengaged."""
+    if not CS.out.canValid:
+      return []
+    stock_request = CS.tss3_stock_control_request if self.stock_longitudinal else None
+    values = toyotacan.create_tss3_control_request_values(stock_request, False, target_angle_deg_to_raw(angle_deg), False, 0.0, CS.out.vCruise, 0)
+    application = self.packer.make_can_msg("CONTROL_REQUEST", TSS3_CHASSIS_BUS, values)[1][:28]
+    self.probe_sequence = self.next_signer_sequence
+    self.next_signer_sequence = self.probe_sequence % SIGNER_SEQUENCE_MAX + 1
+    self.last_probe_ns = now_ns
+    return toyotacan.create_tss3_signer_requests(self.packer, TSS3_CHASSIS_BUS, self.probe_sequence, application)
 
   def _publish_ready(self, now_ns: int) -> bool:
     request = next(iter(self.pending.values()), None)
@@ -128,8 +159,7 @@ class SignerTransport:
       return False
     return len(self.pending) - int(self._publish_ready(now_ns)) < SIGNER_MAX_PENDING
 
-  def send(self, CS, enabled: bool, lat_active: bool, angle_deg: float, long_active: bool, accel: float,
-           now_ns: int) -> list[CanData]:
+  def send(self, CS, enabled: bool, lat_active: bool, angle_deg: float, long_active: bool, accel: float, now_ns: int) -> list[CanData]:
     """Publish the next signed request and sign the latest one, call after receive()."""
     sends: list[CanData] = []
     if not enabled or not CS.out.canValid:
@@ -150,8 +180,9 @@ class SignerTransport:
     # then sign the latest request
     if len(self.pending) < SIGNER_MAX_PENDING:
       stock_request = CS.tss3_stock_control_request if self.stock_longitudinal else None
-      values = toyotacan.create_tss3_control_request_values(stock_request, lat_active, target_angle_deg_to_raw(angle_deg),
-                                                            long_active, accel, CS.out.vCruise, self.next_request_sequence)
+      values = toyotacan.create_tss3_control_request_values(
+        stock_request, lat_active, target_angle_deg_to_raw(angle_deg), long_active, accel, CS.out.vCruise, self.next_request_sequence
+      )
       application = self.packer.make_can_msg("CONTROL_REQUEST", TSS3_CHASSIS_BUS, values)[1][:28]
       seq = self.next_signer_sequence
       self.next_signer_sequence = seq % SIGNER_SEQUENCE_MAX + 1
