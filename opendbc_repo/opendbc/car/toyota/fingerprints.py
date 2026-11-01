@@ -10,6 +10,21 @@ FINGERPRINTS = {
 }
 
 FW_VERSIONS = {
+  CAR.TOYOTA_COROLLA_TSS3: {
+    (Ecu.engine, 0x700, None): [
+      b'\x018A2220212400\x00\x00\x00\x00',
+    ],
+    (Ecu.abs, 0x7b0, None): [
+      b'\x01F152612A5400\x00\x00\x00\x00',
+    ],
+    (Ecu.eps, 0x7a1, None): [
+      b'\x028965F1208000\x00\x00\x00\x008A3111202000\x00\x00\x00\x00',
+      b'\x028965F1208000\x00\x00\x00\x008A3111213000\x00\x00\x00\x00',
+    ],
+    (Ecu.fwdRadar, 0x750, 0xf): [
+      b'\x018821F7801200\x00\x00\x00\x00',
+    ],
+  },
   CAR.TOYOTA_AVALON: {
     (Ecu.abs, 0x7b0, None): [
       b'F152607060\x00\x00\x00\x00\x00\x00',

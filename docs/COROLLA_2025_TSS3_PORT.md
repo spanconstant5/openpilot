@@ -11,7 +11,16 @@ This branch integrates the RAM-resident request signer for the
   `72ffc3eebbec7966177c700a12e3d132f4a5bd03682e61f266bfea62815f8122`.
   It signs correctly but lost residency 7.846 and 8.091 seconds after
   installation in consecutive Corolla captures. StarPilot refuses to install
-  it pending a reviewed relocation.
+  that exact payload; only the separately pinned successor candidate is
+  accepted.
+- Successor candidate payload SHA-256:
+  `6234bb5bd496a82fabb32c27b56b3db0f1907b5bf6482e4c19f8835153ff69fc`,
+  built from clean `kaikozlov/ghidra_rh850` commit
+  `9a7c8a7ec6d0045fdbdb8452cac7d4cf52439e2c`. An independent build produced
+  identical payload, runtime sources, debug ELFs, and disassemblies. Exact
+  archive, entrypoint, runtime-tree, and toolchain hashes are recorded in
+  [`COROLLA_2025_TSS3_SIGNER_KIT.json`](COROLLA_2025_TSS3_SIGNER_KIT.json).
+  This is an offline-qualified candidate, not a vehicle-liveness pass.
 - Installer verdict: `request_signer_live_probe_pass`.
 - Request carrier: four classic eight-byte `0x777` frames on Panda bus 0.
 - Response: classic eight-byte `0x7A9` on Panda bus 0, status zero, containing
@@ -25,6 +34,25 @@ This branch integrates the RAM-resident request signer for the
   continued, so the EPS did not stall and the eight-request pipeline did not
   saturate. The corresponding install log reported `rx_buffer_overflow: 1733`;
   Panda receive pressure is the leading explanation and remains follow-up work.
+
+## Kai baseline reconciliation
+
+The StarPilot port was checked against `kaikozlov/openpilot` branch
+`tss3-expand` at openpilot commit
+`80b8615c39fd1b99dc90303f33053cab975a22ea` and its opendbc commit
+`d8a50afdbe44a2eb55d78b14b6e4f77900dca2fd`. The shared baseline covers the
+TSS3 parser/controller, signer-response engagement gate, checksum validation,
+and Toyota safety policy. This branch retains its Corolla-specific startup
+bridge, bus-2 receive topology, request-plane diagnostics, and narrower Panda
+allowlist because those are backed by the later vehicle evidence here.
+
+The Corolla firmware map from that branch is now included. The exact target
+EPS `8965F1208000 / 8A3111213000` is confirmed on this car; the accompanying
+engine `8A2220212400`, ABS `F152612A5400`, and radar `8821F7801200` values are
+Kai's reference set and still need confirmation from this vehicle. Automatic
+matching therefore remains provisional. The baseline's live longitudinal
+policy was deliberately not imported: both longitudinal fields remain forced
+to zero in the interface, controller, and Panda safety layers.
 
 ## Runtime path
 
@@ -80,11 +108,15 @@ malformed or stale lease is removed, while an unrequested native-child exit
 continues through StarPilot's existing recovery path. The rest of openpilot
 and its manager remain running throughout the handoff.
 
-The EPS resident is volatile. A replacement payload must first relocate its
-resident away from Corolla application RAM at `0xFEBFF9F0`; the previously
-tested payload at that address is revoked. Once a relocated kit is reviewed and
-its hashes are pinned, when `CarModel` already selects this exact Corolla,
-`card` starts the
+The EPS resident is volatile. The old assembly payload at `0xFEBFF9F0` is
+revoked because it repeatedly stopped answering within about eight seconds.
+Five retained PE1/self-alias RAM captures across the 2025 and 2023 Corolla
+packages show its 656-byte candidate region zero and the surrounding tail
+stable, so those captures do not prove an application overwrite or require
+relocation. The successor uses Kai's current
+self-resolving C implementation and remains a stationary-only candidate until
+it crosses the old lifetime boundary on the vehicle. With that exact reviewed
+kit installed, when `CarModel` already selects this exact Corolla, `card` starts the
 installer-proven inactive `0x777` challenge as soon as live CAN also shows the
 mirrored 32-byte native `0x08A` plane on buses 0 and 2. One transport maintains
 a single response-paced inactive challenge through CAN-only fingerprinting and
@@ -144,7 +176,7 @@ The ordered evidence gates and post-route analysis command are maintained in
   under controlled driving conditions.
 - Repeat the stationary sustained-rate benchmark long enough to cross both the
   ELM327-to-Toyota safety transition and the earlier eight-second signer
-  boundary after installing a relocated resident. The current payload is
+  boundary after installing the reviewed successor. The old payload remains
   revoked because it stops responding at that boundary.
 - Dynamically validate the 2025 steering calibration and driver-override
   threshold rather than relying indefinitely on inherited E210 geometry.

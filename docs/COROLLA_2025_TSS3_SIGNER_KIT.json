@@ -1,0 +1,53 @@
+{
+  "schema": "star2025-corolla-tss3-signer-kit-v1",
+  "source": {
+    "repository": "https://github.com/kaikozlov/ghidra_rh850.git",
+    "commit": "9a7c8a7ec6d0045fdbdb8452cac7d4cf52439e2c",
+    "dirty": false
+  },
+  "supplied_archive": {
+    "name": "tss3-oracle-span-9a7c8a7e.zip",
+    "size": 98726,
+    "sha256": "ba8656cecb668f4651c0231de8e1449fe38ff49c602943d7a86b6efb6abace93"
+  },
+  "kit": {
+    "schema": "tss3-request-signer-build-v2",
+    "target": "corolla-8965F1208000",
+    "application_f181_hex": "023839363546313230383030300000000038413331313132313330303000000000",
+    "request": {
+      "bus": 0,
+      "can_id": "0x00000777",
+      "codec": "four-frame",
+      "carrier": "functional-nibble4"
+    },
+    "response": {
+      "bus": 0,
+      "can_id": "0x000007A9"
+    },
+    "state_base": "0xFEBFF9F0",
+    "state_size": 36,
+    "payload_size": 4096,
+    "payload_sha256": "6234bb5bd496a82fabb32c27b56b3db0f1907b5bf6482e4c19f8835153ff69fc",
+    "metadata_sha256": "d4eb24d0f8cb7d62ea93efe9a46d591882b177f0f64717a7314ff75cef2c8b6b",
+    "launcher_sha256": "4c4dd0d56177908bf58b36bf6b57ea972b4ea635581202a0b2f5848252fcbfd6",
+    "host_sha256": "beab7cdeaa685ff98de2f7751ddc39f8a096dd6c177bf812ed8c7878aadd31b1",
+    "ui_bringup_sha256": "9c0dd6733ae70250c493eac06c9f176e9762d2765cfb8691a282b6cada7121e6",
+    "runtime_source_sha256": "03765858c09aba296ffff8670422e53f71d0051ec7ec70699212349eb8a64dcb"
+  },
+  "supplied_toolchain": {
+    "image": "ghidra-rh850-v850-gcc:16.2.0-binutils2.46.1-gdb18.1-simfix4-bswap1-noreturn1-codegen1-unwind1",
+    "image_id": "sha256:02e2f90e2c3a7e2363cff1419ee1c12580cdcf613e00dd41da33e53b21eceb65"
+  },
+  "independent_rebuild": {
+    "image_id": "sha256:c78374b49484620d7879f9aa19e112165820ea63710b6ea6c077eac27b9e6fb8",
+    "payload_matches": true,
+    "runtime_sources_match": true,
+    "debug_artifacts_match": true,
+    "only_expected_metadata_difference": "toolchain.image_id"
+  },
+  "revoked_payload_sha256": [
+    "72ffc3eebbec7966177c700a12e3d132f4a5bd03682e61f266bfea62815f8122"
+  ],
+  "vehicle_authority": "stationary validation pending; no moving-road authority",
+  "longitudinal_control": "disabled; both fields must remain zero"
+}

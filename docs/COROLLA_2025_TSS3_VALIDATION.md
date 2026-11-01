@@ -9,12 +9,12 @@ authority for the 2025 control messages.
 
 | Area | State | Evidence / next gate |
 |---|---|---|
-| RAM signer install | Transport proven; payload revoked | October 30 and 31 installations matched F181 and the pinned payload and passed their first Classical-CAN probes in 12.19 and 14.94 ms. The resident then stopped responding 8.091 and 7.846 s after install, so hash `72ffc3ee…` is rejected pending relocation. |
+| RAM signer install | Transport proven; successor candidate pending | October 30 and 31 installations matched F181 and the old pinned payload and passed their first Classical-CAN probes in 12.19 and 14.94 ms. That payload stopped responding 8.091 and 7.846 s after install, so hash `72ffc3ee…` remains revoked. Candidate `6234bb5b…` was independently reproduced from clean RH850 commit `9a7c8a7e…` and still requires a stationary install. |
 | Bench peer health | Inconclusive | All eight attempts had clear Brake `0x102D` fault bits and the same 8-byte `0x102F`; Kai's current Camry decoder requires 10 bytes. This is not a confirmed fault and is not a health pass. |
 | Signed inactive `0x08A` | Offline/probe proven | Exact 28-byte inactive application and valid trailer are proven. The October 29 route proves native runtime signing but contains no engagement, so it cannot prove host `0x08A` publication. |
-| Runtime signer preflight | Resident lifetime failed twice | Exact commit `9d9a220573` produced 382 and 369 valid bus-0 responses under continuous response-paced challenges. The last responses were 8.091 and 7.846 s after install; later Classical-CAN requests remained Panda-accepted with zero rejects. A relocated resident is required. |
+| Runtime signer preflight | Successor vehicle gate pending | Exact commit `9d9a220573` produced 382 and 369 valid bus-0 responses from the old payload under continuous response-paced challenges. The last responses were 8.091 and 7.846 s after install; later Classical-CAN requests remained Panda-accepted with zero rejects. The successor must remain live across that boundary and the Toyota-safety transition. |
 | Vehicle receive topology | Route-replay proven | The full-rate Corolla stream is on Panda bus 2. CarState and Panda safety consume it there; the incomplete forwarded bus-0 TX-record stream is not used as a receive source. |
-| Fingerprint recovery | Three-bus route proven | When FPv1 is ambiguous, recovery requires explicit Corolla identity authority (stored selection or prior exact EPS signer probe), at least 120 DLC-exact Corolla census matches on each mirrored vehicle plane (buses 0 and 2), no conflicting census DLC, and the complete retained CAN-FD ADAS census on bus 1. Topology alone cannot identify the car. |
+| Fingerprint recovery | Three-bus route proven; firmware map provisional | Kai's reference map now includes the exact confirmed `8965F1208000 / 8A3111213000` EPS, but its engine, ABS, and radar values are not yet confirmed on this car. When FPv1 is ambiguous, recovery still requires explicit Corolla identity authority (stored selection or prior exact EPS signer probe), at least 120 DLC-exact Corolla census matches on each mirrored vehicle plane (buses 0 and 2), no conflicting census DLC, and the complete retained CAN-FD ADAS census on bus 1. Topology alone cannot identify the car. |
 | Lateral control | Implemented, road validation pending | Angle command uses the signed `0x08A`; 55-degree wheel-angle bound and measured-angle inactive check are enforced. |
 | Longitudinal control | Disabled | Interface, controller, and Panda safety all keep both acceleration fields zero. IDs and limits are not yet accepted as Corolla-live evidence. |
 
@@ -301,9 +301,16 @@ fragments were accepted, with zero rejects, and requests continued through
 route offset 60.737 s without another response. Continuous challenges therefore
 do not retain the resident, and neither CAN-FD promotion nor Toyota safety
 rejection explains the loss. The external payload places its resident at
-`0xFEBFF9F0`, inside Corolla application RAM; it must be relocated and rebuilt.
-StarPilot now rejects the proven-expiring payload hash until a replacement is
-reviewed and pinned.
+`0xFEBFF9F0`, so address collision was initially suspected. Later review of
+five retained PE1/self-alias RAM captures across the 2025 and 2023 Corolla
+packages found the entire 656-byte
+`0xFEBFF9F0..0xFEBFFC7F` candidate region zero in every capture. The larger
+1,552-byte tail through `0xFEBFFFFF` was byte-identical in all five captures
+and contained only 48 nonzero bytes outside that candidate region. This does
+not prove post-install persistence, but it does mean the captures do not prove
+an application overwrite or require relocation. The demonstrated failure is
+the old payload's implementation/liveness. StarPilot rejects that exact hash
+until a separately built successor is reviewed and pinned.
 
 This was not a stationary route despite the validation gate: it reached
 12.868 m/s and selected Drive and Reverse. Openpilot remained disabled with no
@@ -323,6 +330,20 @@ selected Drive, Reverse, and Neutral despite the stationary gate. Openpilot was
 never engageable or enabled, Panda never allowed controls, no host `0x08A` was
 published, and every longitudinal field remained zero. This repeat adds no
 authority and confirms that testing must stop until the revoked kit is replaced.
+
+The November 1 successor kit replaces that revoked payload without changing
+the proven vehicle transport. Archive `tss3-oracle-span-9a7c8a7e.zip` has
+SHA-256 `ba8656cecb668f4651c0231de8e1449fe38ff49c602943d7a86b6efb6abace93`.
+Every shipped runtime source matches clean `kaikozlov/ghidra_rh850` commit
+`9a7c8a7ec6d0045fdbdb8452cac7d4cf52439e2c`; an independent toolchain build
+reproduced its `6234bb5bd496a82fabb32c27b56b3db0f1907b5bf6482e4c19f8835153ff69fc`
+payload and every debug artifact. The kit's offline doctor, RH850 toolchain
+doctor/self-test, boot-transition test, guided-startup test, and functional
+signer simulations pass. The unmodified signer suite encounters one GCC 15
+`-Werror=maybe-uninitialized` false positive in the host-only resolver build;
+demoting only that warning lets all four signer groups pass. This candidate has
+not yet run on the vehicle, so it establishes neither persistence past eight
+seconds nor handoff authority.
 
 The installer summaries on the earlier runs marked clean builds dirty because
 persisted `GitDiff` included runtime-selected theme symlinks. Route `initData`

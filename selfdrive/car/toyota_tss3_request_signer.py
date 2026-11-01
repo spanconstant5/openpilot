@@ -16,14 +16,18 @@ DEFAULT_TOOL_PATH = Path("/data/tss3-oracle/tss3-request-signer")
 DEFAULT_RUN_ROOT = Path("/data/tss3-oracle-runs")
 EXPECTED_TARGET = "corolla-8965F1208000"
 EXPECTED_APPLICATION_F181 = "023839363546313230383030300000000038413331313132313330303000000000"
-EXPECTED_HOST_SHA256 = "6914a964a0871de7c35fb1e35e3671f379a2b83f5e16deabbc810ea401871fee"
-EXPECTED_PAYLOAD_SHA256 = "72ffc3eebbec7966177c700a12e3d132f4a5bd03682e61f266bfea62815f8122"
+EXPECTED_KIT_SCHEMA = "tss3-request-signer-build-v2"
+# Reviewed output from kaikozlov/ghidra_rh850 commit 9a7c8a7ec6d0045fdbdb8452cac7d4cf52439e2c.
+EXPECTED_HOST_SHA256 = "beab7cdeaa685ff98de2f7751ddc39f8a096dd6c177bf812ed8c7878aadd31b1"
+EXPECTED_UI_BRINGUP_SHA256 = "9c0dd6733ae70250c493eac06c9f176e9762d2765cfb8691a282b6cada7121e6"
+EXPECTED_LAUNCHER_SHA256 = "4c4dd0d56177908bf58b36bf6b57ea972b4ea635581202a0b2f5848252fcbfd6"
+EXPECTED_RUNTIME_SOURCE_SHA256 = "03765858c09aba296ffff8670422e53f71d0051ec7ec70699212349eb8a64dcb"
+EXPECTED_PAYLOAD_SHA256 = "6234bb5bd496a82fabb32c27b56b3db0f1907b5bf6482e4c19f8835153ff69fc"
 # October 30 and 31 vehicle evidence proved this resident stops responding
 # within about 8 seconds of installation even under continuous response-paced
-# challenges. Its
-# 0xFEBFF9F0 placement is inside Corolla application RAM and is not a usable
-# control authority. Keep the hash explicit so an unchanged external kit fails
-# closed until a relocated payload is reviewed and pinned above.
+# challenges. The old assembly implementation is not a usable control
+# authority. Keep the hash explicit so an unchanged external kit fails closed
+# when a reviewed successor is pinned above.
 REVOKED_PAYLOAD_SHA256S = frozenset({
   "72ffc3eebbec7966177c700a12e3d132f4a5bd03682e61f266bfea62815f8122",
 })
@@ -86,6 +90,20 @@ def _sha256(path: Path) -> str:
   return digest.hexdigest()
 
 
+def _runtime_source_sha256(runtime_root: Path) -> str:
+  """Hash the complete executable Python/shell surface shipped by the kit."""
+  digest = hashlib.sha256()
+  paths = sorted(path for path in runtime_root.rglob("*") if path.is_file() and path.suffix in (".py", ".sh"))
+  for path in paths:
+    relative = path.relative_to(runtime_root).as_posix().encode()
+    digest.update(len(relative).to_bytes(4, "big"))
+    digest.update(relative)
+    with path.open("rb") as f:
+      for chunk in iter(lambda: f.read(1024 * 1024), b""):
+        digest.update(chunk)
+  return digest.hexdigest()
+
+
 def _tool_path(tool_path: Path | None = None) -> Path:
   return tool_path or Path(os.getenv("TSS3_REQUEST_SIGNER_TOOL", str(DEFAULT_TOOL_PATH)))
 
@@ -106,8 +124,9 @@ def request_signer_kit_compatibility(tool_path: Path | None = None) -> SignerKit
     return SignerKitCheck(False, f"Signer tool unavailable: {tool}")
 
   root = tool.parent
-  host_path = root / "runtime" / "exploit" / "ephemeral_runtime" / "tss3_request_signer.py"
-  ui_bringup_path = root / "runtime" / "exploit" / "ephemeral_runtime" / "tss3_request_signer_ui_bringup.py"
+  runtime_root = root / "runtime"
+  host_path = root / "runtime" / "tsk" / "ram_runtime" / "tss3_request_signer.py"
+  ui_bringup_path = root / "runtime" / "tsk" / "ram_runtime" / "tss3_request_signer_ui_bringup.py"
   meta_path = root / "bundle" / "request_signer.json"
   payload_path = root / "bundle" / "payload.bin"
 
@@ -133,6 +152,9 @@ def request_signer_kit_compatibility(tool_path: Path | None = None) -> SignerKit
   response = meta.get("response") if isinstance(meta.get("response"), dict) else {}
   authenticated_payload = meta.get("authenticated_payload") if isinstance(meta.get("authenticated_payload"), dict) else {}
 
+  if meta.get("schema") != EXPECTED_KIT_SCHEMA:
+    return SignerKitCheck(False, f"Unsupported signer metadata schema: {meta.get('schema', 'missing')}")
+
   if target.get("name") != EXPECTED_TARGET or target.get("application_f181_hex") != EXPECTED_APPLICATION_F181:
     return SignerKitCheck(False, f"Wrong signer target: {target.get('name', 'unknown')}; need {EXPECTED_TARGET}")
   if (request.get("bus"), request.get("can_id"), request.get("codec"), request.get("carrier")) != \
@@ -140,23 +162,32 @@ def request_signer_kit_compatibility(tool_path: Path | None = None) -> SignerKit
     return SignerKitCheck(False, "Signer request transport is not the proven Corolla bus-0 four-frame profile")
   if (response.get("bus"), response.get("can_id")) != (0, "0x000007A9"):
     return SignerKitCheck(False, "Signer response transport is not the proven Corolla bus-0 profile")
-  if authenticated_payload.get("sha256") != EXPECTED_PAYLOAD_SHA256:
-    return SignerKitCheck(False, "Signer metadata names an unexpected authenticated payload")
   if authenticated_payload.get("sha256") in REVOKED_PAYLOAD_SHA256S:
     return SignerKitCheck(
       False,
-      "Signer payload revoked: Corolla resident placement expires after about 8 seconds; " +
-      "install a reviewed relocated payload before vehicle validation",
+      "Signer payload revoked: the old Corolla resident stops after about 8 seconds; " +
+      "install the reviewed successor payload before vehicle validation",
     )
+  if authenticated_payload.get("sha256") != EXPECTED_PAYLOAD_SHA256:
+    return SignerKitCheck(False, "Signer metadata names an unexpected authenticated payload")
 
   try:
+    launcher_sha256 = _sha256(tool)
     host_sha256 = _sha256(host_path)
+    ui_bringup_sha256 = _sha256(ui_bringup_path)
+    runtime_source_sha256 = _runtime_source_sha256(runtime_root)
     payload_sha256 = _sha256(payload_path)
   except OSError as exc:
     return SignerKitCheck(False, f"Could not hash signer kit: {type(exc).__name__}: {exc}")
 
+  if launcher_sha256 != EXPECTED_LAUNCHER_SHA256:
+    return SignerKitCheck(False, f"Signer launcher hash mismatch: {launcher_sha256}")
   if host_sha256 != EXPECTED_HOST_SHA256:
     return SignerKitCheck(False, f"Signer host runtime hash mismatch: {host_sha256}")
+  if ui_bringup_sha256 != EXPECTED_UI_BRINGUP_SHA256:
+    return SignerKitCheck(False, f"Signer UI bringup hash mismatch: {ui_bringup_sha256}")
+  if runtime_source_sha256 != EXPECTED_RUNTIME_SOURCE_SHA256:
+    return SignerKitCheck(False, f"Signer runtime source hash mismatch: {runtime_source_sha256}")
   if payload_sha256 != EXPECTED_PAYLOAD_SHA256:
     return SignerKitCheck(False, f"Signer payload hash mismatch: {payload_sha256}")
 

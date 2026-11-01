@@ -8,9 +8,10 @@ It carries the supplied Corolla control work into StarPilot while preserving
 the narrow Panda transmit allowlist and the evidence boundaries around the
 vehicle.
 
-The RAM-resident signer transport is verified live on the target EPS, but the
-current payload repeatedly loses residency within about eight seconds and is now
-revoked. A relocated resident must pass stationary validation before this
+The RAM-resident signer transport is verified live on the target EPS. The old
+payload repeatedly stopped answering within about eight seconds and is revoked;
+a successor built from Kai's current self-resolving implementation is pinned as
+a stationary-only candidate. It must pass the full stationary gate before this
 integration can be road-qualified. Longitudinal control remains deliberately
 disabled.
 
@@ -20,13 +21,13 @@ disabled.
 |---|---|---|
 | 2025 EPS identity | Verified | F181 `8965F1208000` + `8A3111213000`, serial `8965012N50E12H030731`, MCU `R7F701383` |
 | EPS application transfer | Verified offline | The analyzed 2025 and 2023 high application regions are byte-identical from `0x17E00` upward |
-| RAM-resident signer | Relocation required | Payload SHA-256 `72ffc3eebbec7966177c700a12e3d132f4a5bd03682e61f266bfea62815f8122` answers correctly but lost residency 7.846 and 8.091 s after install in consecutive captures; StarPilot rejects this hash. |
+| RAM-resident signer | Successor build pending vehicle validation | Old payload `72ffc3ee…` stopped after 7.846 and 8.091 s and remains revoked. Candidate `6234bb5b…`, independently rebuilt from clean RH850 source commit `9a7c8a7e…`, is the only accepted kit and still needs the stationary >8 s gate. |
 | Signer transport | Verified live | Four classic `0x777` frames and `0x7A9` response on Panda bus 0 |
 | 100 Hz benchmark | Qualified with loss handling | 100 sent, 95 responses, 94.343 Hz effective, 25.366 ms maximum latency, max 7 outstanding; five isolated responses were dropped during high Panda RX-buffer overflow |
 | Lateral command | Integrated, offline-tested | Signed host `0x08A`, Corolla 55-degree cap, 100 Hz scheduler and 90 ms signer watchdog |
 | Longitudinal command | Disabled | Host application is constrained to zero acceleration pending separate Corolla validation |
 | Panda safety | Debug-gated and tested | Exact Corolla signer carrier, admin, and signed-`0x08A` envelopes only |
-| Automatic vehicle identification | Unresolved | Available moving traces are not uniquely joined to the 2025 F181 identity |
+| Automatic vehicle identification | Provisional firmware map added | Kai's `tss3-expand` Corolla map now includes the exact `8965F1208000 / 8A3111213000` EPS. Its engine, ABS, and radar versions still need confirmation from this car, so manual selection remains the authority. |
 | Vehicle-specific tuning | Unresolved | Exact 2025 mass, steering ratio calibration, and driver-override threshold are not proved |
 
 ## Use the manual vehicle selection
@@ -43,7 +44,7 @@ fingerprint that could silently identify another Toyota as this car.
 
 ## Reinstall the volatile signer on the comma
 
-The verified request-signer kit must remain at `/data/tss3-oracle`. After a
+The exact pinned request-signer kit must remain at `/data/tss3-oracle`. After a
 full vehicle power cycle, turn the vehicle on, leave it in Park with the wheels
 straight, and open:
 

@@ -682,6 +682,8 @@ class TestToyotaInterfaces:
       with subtests.test(car_model=car_model.value):
         present_ecus = {ecu[0] for ecu in ecus}
         missing_ecus = common_ecus - present_ecus
+        if car_model == CAR.TOYOTA_COROLLA_TSS3:
+          missing_ecus -= {Ecu.fwdCamera}
         assert len(missing_ecus) == 0
 
         # Some exceptions for other common ECUs
@@ -696,6 +698,24 @@ class TestToyotaInterfaces:
 
 
 class TestToyotaFingerprint:
+  def test_corolla_tss3_reference_fw_exact_match(self):
+    reference_fw = {
+      (Ecu.engine, 0x700, None): b'\x018A2220212400\x00\x00\x00\x00',
+      (Ecu.abs, 0x7b0, None): b'\x01F152612A5400\x00\x00\x00\x00',
+      (Ecu.eps, 0x7a1, None): b'\x028965F1208000\x00\x00\x00\x008A3111213000\x00\x00\x00\x00',
+      (Ecu.fwdRadar, 0x750, 0xf): b'\x018821F7801200\x00\x00\x00\x00',
+    }
+    car_fw = [
+      CarParams.CarFw(ecu=ecu, address=address, subAddress=0 if sub_address is None else sub_address,
+                      fwVersion=version, brand="toyota")
+      for (ecu, address, sub_address), version in reference_fw.items()
+    ]
+
+    exact, matches = match_fw_to_car(car_fw, "", allow_fuzzy=False, log=False)
+
+    assert exact
+    assert matches == {CAR.TOYOTA_COROLLA_TSS3}
+
   def test_sienna_2025_route_fw_exact_match(self):
     route_fw = {
       (Ecu.engine, 0x700, None): b'\x01896630869000\x00\x00\x00\x00',
@@ -750,6 +770,8 @@ class TestToyotaFingerprint:
           if platform_code_ecu == Ecu.eps and car_model in (CAR.TOYOTA_PRIUS_V, CAR.LEXUS_CTH,):
             continue
           if platform_code_ecu == Ecu.abs and car_model in (CAR.TOYOTA_ALPHARD_TSS2,):
+            continue
+          if platform_code_ecu == Ecu.fwdCamera and car_model == CAR.TOYOTA_COROLLA_TSS3:
             continue
           assert platform_code_ecu in [e[0] for e in ecus]
 
