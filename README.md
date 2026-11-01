@@ -9,7 +9,7 @@ the narrow Panda transmit allowlist and the evidence boundaries around the
 vehicle.
 
 The RAM-resident signer transport is verified live on the target EPS, but the
-current payload loses residency 8.091 seconds after installation and is now
+current payload repeatedly loses residency within about eight seconds and is now
 revoked. A relocated resident must pass stationary validation before this
 integration can be road-qualified. Longitudinal control remains deliberately
 disabled.
@@ -20,7 +20,7 @@ disabled.
 |---|---|---|
 | 2025 EPS identity | Verified | F181 `8965F1208000` + `8A3111213000`, serial `8965012N50E12H030731`, MCU `R7F701383` |
 | EPS application transfer | Verified offline | The analyzed 2025 and 2023 high application regions are byte-identical from `0x17E00` upward |
-| RAM-resident signer | Relocation required | Payload SHA-256 `72ffc3eebbec7966177c700a12e3d132f4a5bd03682e61f266bfea62815f8122` answers correctly but loses residency 8.091 s after install; StarPilot now rejects this hash. |
+| RAM-resident signer | Relocation required | Payload SHA-256 `72ffc3eebbec7966177c700a12e3d132f4a5bd03682e61f266bfea62815f8122` answers correctly but lost residency 7.846 and 8.091 s after install in consecutive captures; StarPilot rejects this hash. |
 | Signer transport | Verified live | Four classic `0x777` frames and `0x7A9` response on Panda bus 0 |
 | 100 Hz benchmark | Qualified with loss handling | 100 sent, 95 responses, 94.343 Hz effective, 25.366 ms maximum latency, max 7 outstanding; five isolated responses were dropped during high Panda RX-buffer overflow |
 | Lateral command | Integrated, offline-tested | Signed host `0x08A`, Corolla 55-degree cap, 100 Hz scheduler and 90 ms signer watchdog |

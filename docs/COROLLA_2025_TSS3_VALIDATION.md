@@ -9,10 +9,10 @@ authority for the 2025 control messages.
 
 | Area | State | Evidence / next gate |
 |---|---|---|
-| RAM signer install | Transport proven; payload revoked | October 30 installation matched F181 and the pinned payload and passed its first Classical-CAN probe in 12.19 ms. The resident then stopped responding 8.091 s after install, so hash `72ffc3ee…` is now rejected pending relocation. |
-| Bench peer health | Inconclusive | All seven attempts had clear Brake `0x102D` fault bits and the same 8-byte `0x102F`; Kai's current Camry decoder requires 10 bytes. This is not a confirmed fault and is not a health pass. |
+| RAM signer install | Transport proven; payload revoked | October 30 and 31 installations matched F181 and the pinned payload and passed their first Classical-CAN probes in 12.19 and 14.94 ms. The resident then stopped responding 8.091 and 7.846 s after install, so hash `72ffc3ee…` is rejected pending relocation. |
+| Bench peer health | Inconclusive | All eight attempts had clear Brake `0x102D` fault bits and the same 8-byte `0x102F`; Kai's current Camry decoder requires 10 bytes. This is not a confirmed fault and is not a health pass. |
 | Signed inactive `0x08A` | Offline/probe proven | Exact 28-byte inactive application and valid trailer are proven. The October 29 route proves native runtime signing but contains no engagement, so it cannot prove host `0x08A` publication. |
-| Runtime signer preflight | Resident lifetime failed | Exact commit `9d9a220573` produced 382 valid bus-0 responses under continuous response-paced challenges. The last was 8.091 s after install; later Classical-CAN requests remained Panda-accepted with zero rejects through 60.737 route seconds but received no response. A relocated resident is required. |
+| Runtime signer preflight | Resident lifetime failed twice | Exact commit `9d9a220573` produced 382 and 369 valid bus-0 responses under continuous response-paced challenges. The last responses were 8.091 and 7.846 s after install; later Classical-CAN requests remained Panda-accepted with zero rejects. A relocated resident is required. |
 | Vehicle receive topology | Route-replay proven | The full-rate Corolla stream is on Panda bus 2. CarState and Panda safety consume it there; the incomplete forwarded bus-0 TX-record stream is not used as a receive source. |
 | Fingerprint recovery | Three-bus route proven | When FPv1 is ambiguous, recovery requires explicit Corolla identity authority (stored selection or prior exact EPS signer probe), at least 120 DLC-exact Corolla census matches on each mirrored vehicle plane (buses 0 and 2), no conflicting census DLC, and the complete retained CAN-FD ADAS census on bus 1. Topology alone cannot identify the car. |
 | Lateral control | Implemented, road validation pending | Angle command uses the signed `0x08A`; 55-degree wheel-angle bound and measured-angle inactive check are enforced. |
@@ -311,6 +311,18 @@ active lateral or longitudinal control, published no host `0x08A`, recorded no
 Panda faults or invalid RX checks, and kept both longitudinal fields and
 actuator acceleration zero. No moving-road authority is established by this
 capture.
+
+The October 31 capture independently repeats the result with the same revoked
+payload and old clean runtime commit `9d9a220573`. Logging began 0.602 s after
+installation. It recorded 369 status-zero bus-0 responses, mirrored on bus 2;
+the last was 7.846 s after install. Panda changed to Toyota safety at 7.935 s
+after install, again about 89 ms later. Panda accepted all 1,692 request
+fragments with zero rejects and continued accepting them through route offset
+61.489 s, but the signer never answered again. The route reached 10.392 m/s and
+selected Drive, Reverse, and Neutral despite the stationary gate. Openpilot was
+never engageable or enabled, Panda never allowed controls, no host `0x08A` was
+published, and every longitudinal field remained zero. This repeat adds no
+authority and confirms that testing must stop until the revoked kit is replaced.
 
 The installer summaries on the earlier runs marked clean builds dirty because
 persisted `GitDiff` included runtime-selected theme symlinks. Route `initData`

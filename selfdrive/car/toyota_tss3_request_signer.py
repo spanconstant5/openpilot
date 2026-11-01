@@ -18,8 +18,9 @@ EXPECTED_TARGET = "corolla-8965F1208000"
 EXPECTED_APPLICATION_F181 = "023839363546313230383030300000000038413331313132313330303000000000"
 EXPECTED_HOST_SHA256 = "6914a964a0871de7c35fb1e35e3671f379a2b83f5e16deabbc810ea401871fee"
 EXPECTED_PAYLOAD_SHA256 = "72ffc3eebbec7966177c700a12e3d132f4a5bd03682e61f266bfea62815f8122"
-# October 30 vehicle evidence proved this resident stops responding 8.091 s
-# after installation even under continuous response-paced challenges. Its
+# October 30 and 31 vehicle evidence proved this resident stops responding
+# within about 8 seconds of installation even under continuous response-paced
+# challenges. Its
 # 0xFEBFF9F0 placement is inside Corolla application RAM and is not a usable
 # control authority. Keep the hash explicit so an unchanged external kit fails
 # closed until a relocated payload is reviewed and pinned above.

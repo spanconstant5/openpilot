@@ -9,8 +9,9 @@ This branch integrates the RAM-resident request signer for the
 - Exact EPS F181: `8965F1208000 / 8A3111213000`.
 - Revoked resident payload SHA-256:
   `72ffc3eebbec7966177c700a12e3d132f4a5bd03682e61f266bfea62815f8122`.
-  It signs correctly but loses residency 8.091 seconds after installation on
-  this Corolla. StarPilot refuses to install it pending a reviewed relocation.
+  It signs correctly but lost residency 7.846 and 8.091 seconds after
+  installation in consecutive Corolla captures. StarPilot refuses to install
+  it pending a reviewed relocation.
 - Installer verdict: `request_signer_live_probe_pass`.
 - Request carrier: four classic eight-byte `0x777` frames on Panda bus 0.
 - Response: classic eight-byte `0x7A9` on Panda bus 0, status zero, containing
