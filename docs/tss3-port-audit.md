@@ -190,6 +190,48 @@ Run 2026-10-09 with `opendbc_repo/.venv`:
   still not authorized until a new stationary route proves continuous bus-2
   signer responses and host publication behavior.
 
+### 2026-11-02 Corolla bus-2 signer validation
+
+- Bundle `20261102T174008-1686-55426954509` ran the exact clean parent
+  `f52a872b18`, opendbc `e59da8d8db`, and Panda `f38f504ffa`. The installed
+  Panda reported `DEV-f38f504f-DEBUG`; its signature prefix `5423f5e1fdf937be`
+  matched the rebuilt firmware file. The kit bound the exact Corolla EPS F181,
+  installed payload
+  `6234bb5bd496a82fabb32c27b56b3db0f1907b5bf6482e4c19f8835153ff69fc`,
+  and received a status-zero live-probe response in 65.439 ms with four
+  accepted and zero rejected transmissions. No persistent flash write, payload
+  upload, or ECU reset was used.
+- The newly routed bus-2 runtime path remained live under Toyota safety. One
+  run received 55 valid status-zero `0x7A9` responses in uninterrupted signer
+  sequence 1 through 55 over 54.001 seconds; 54 of those responses followed
+  the Toyota-safety transition. Its 55 four-frame `0x777` requests produced
+  all 220 accepted bus-2 receipts and no bus-194 rejection receipt. A separate
+  steady-state run continued uninterrupted sequence 56 through 82 for another
+  25.990 seconds, with all 108 fragments accepted and none rejected. This
+  closes the prior relay-egress failure and establishes signer residency well
+  beyond eight seconds.
+- Firmware matching was exact and non-fuzzy as `TOYOTA_COROLLA_TSS3`, with
+  dashcam mode disabled and Toyota safety parameter `12873`. In the startup
+  run, the first 40 CarState samples were invalid only while required frames
+  populated; the following 5,510 samples were CAN-valid. The steady-state run
+  was CAN-valid for all 2,684 samples. Panda's Toyota RX checks stayed valid,
+  and neither run reported `canError` or `canBusMissing`. The one startup
+  `signerUnavailable` event cleared on the first valid response. The lone
+  `controlsMismatch` sample occurred only when the other run deliberately left
+  Toyota safety for ELM327 installer mode; it was not present in the stable
+  Toyota interval.
+- Both runs remained in Park at 0 m/s with stock longitudinal selected.
+  CarControl and CarOutput acceleration were exactly 0.0 throughout. Every
+  logged `0x08A` was the 32-byte native FRC request or its byte-identical Panda
+  passthrough; no host-signed `0x08A` was published because controls were never
+  engaged. The single aggregate `safetyTxBlocked` increment occurred in the
+  ELM327 startup transition and reset to zero on entry to Toyota safety; there
+  were no rejected signer or host-publication loopbacks. The stationary test
+  therefore validates fingerprinting, CAN/safety health, continuous signer
+  transport, and zero longitudinal output, but an engaged stationary capture
+  is still required to validate payload-matched host `0x08A` publication before
+  moving-road validation.
+
 ## File inventory (merge-base diffs vs commaai master, 2026-10-09)
 
 ### opendbc — 22 files, +2,258 / −57
