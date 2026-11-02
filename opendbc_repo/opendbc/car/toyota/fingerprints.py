@@ -37,6 +37,7 @@ FW_VERSIONS = {
     ],
     (Ecu.fwdRadar, 0x750, 0xf): [
       b'\x018821F7801200\x00\x00\x00\x00',
+      b'\x018821F4801200\x00\x00\x00\x00',
     ],
   },
   CAR.TOYOTA_AVALON: {
