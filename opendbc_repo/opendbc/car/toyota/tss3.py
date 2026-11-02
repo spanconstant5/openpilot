@@ -9,7 +9,8 @@ from opendbc.car.carlog import carlog
 from opendbc.car.toyota import toyotacan
 from opendbc.car.toyota.values import CarControllerParams
 
-# The camera harness is repinned so the vehicle network is on bus 0 and the FRC on bus 2
+# The signed CONTROL_REQUEST is published toward the VMC on bus 0. Corolla's
+# EPS signer stays on bus 2 when the relay opens; the other TSS3 ports use 0.
 TSS3_CHASSIS_BUS = 0
 TSS3_AUX_BUS = 1
 TSS3_SOURCE_BUS = 2
@@ -46,9 +47,10 @@ class SignerTransport:
   sent to the signer, and only lets approved requests be published.
   """
 
-  def __init__(self, packer, stock_longitudinal: bool):
+  def __init__(self, packer, stock_longitudinal: bool, signer_bus: int = TSS3_CHASSIS_BUS):
     self.packer = packer
     self.stock_longitudinal = stock_longitudinal
+    self.signer_bus = signer_bus
     self.pending: OrderedDict[int, SignRequest] = OrderedDict()  # by signer sequence, in request order
     self.next_signer_sequence = 1
     self.next_request_sequence = 0
@@ -134,7 +136,7 @@ class SignerTransport:
     self.probe_sequence = self.next_signer_sequence
     self.next_signer_sequence = self.probe_sequence % SIGNER_SEQUENCE_MAX + 1
     self.last_probe_ns = now_ns
-    return toyotacan.create_tss3_signer_requests(self.packer, TSS3_CHASSIS_BUS, self.probe_sequence, application)
+    return toyotacan.create_tss3_signer_requests(self.packer, self.signer_bus, self.probe_sequence, application)
 
   def _publish_ready(self, now_ns: int) -> bool:
     request = next(iter(self.pending.values()), None)
@@ -190,6 +192,6 @@ class SignerTransport:
       self.pending[seq] = SignRequest(values, now_ns)
       self.next_request_sequence = (self.next_request_sequence + 1) & 0x3F
       self.last_request_ns = now_ns
-      sends.extend(toyotacan.create_tss3_signer_requests(self.packer, TSS3_CHASSIS_BUS, seq, application))
+      sends.extend(toyotacan.create_tss3_signer_requests(self.packer, self.signer_bus, seq, application))
 
     return sends

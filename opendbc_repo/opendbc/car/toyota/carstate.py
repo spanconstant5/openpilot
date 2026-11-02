@@ -90,7 +90,8 @@ class CarState(CarStateBase):
   def update_tss3(self, can_parsers) -> structs.CarState:
     cp = can_parsers[Bus.pt]
     cp_cam = can_parsers[Bus.cam]
-    cp_rejected = can_parsers[Bus.loopback]
+    cp_control_rejected = can_parsers[Bus.loopback]
+    cp_signer_rejected = can_parsers[Bus.adas]
     ret = structs.CarState()
 
     # SecOC signer
@@ -99,8 +100,8 @@ class CarState(CarStateBase):
     self.tss3_signer_responses = [{sig: vals[i] for sig, vals in responses.items()} for i in range(len(responses["SIGNER_SEQUENCE"]))]
     self.tss3_stock_control_request = copy.copy(cp_cam.vl["CONTROL_REQUEST"])
     # panda checks the request on the last fragment
-    self.tss3_signer_request_rejected = any(int(header) >> 4 == 0xB for header in cp_rejected.vl_all["SIGNER_REQUEST"]["HEADER"])
-    self.tss3_control_request_rejected = len(cp_rejected.vl_all["CONTROL_REQUEST"]["REQUEST_SEQUENCE"]) > 0
+    self.tss3_signer_request_rejected = any(int(header) >> 4 == 0xB for header in cp_signer_rejected.vl_all["SIGNER_REQUEST"]["HEADER"])
+    self.tss3_control_request_rejected = len(cp_control_rejected.vl_all["CONTROL_REQUEST"]["REQUEST_SEQUENCE"]) > 0
 
     self.tss3_brake_module = copy.copy(cp.vl["BRAKE_MODULE"])
     if cp_cam.vl_all["LKAS_HUD"]["LTA_MODE"]:
@@ -417,6 +418,7 @@ class CarState(CarStateBase):
   @staticmethod
   def get_can_parsers_tss3(CP):
     pt_bus = TSS3_SOURCE_BUS if CP.carFingerprint == CAR.TOYOTA_COROLLA_TSS3 else TSS3_CHASSIS_BUS
+    signer_bus = pt_bus
     pt_messages = [
       ("STEER_ANGLE_SENSOR", 100),
       ("EPS_STATUS", 100),
@@ -444,15 +446,12 @@ class CarState(CarStateBase):
     ]
     if CP.flags & ToyotaFlags.HAS_BSM:
       cam_messages.append(("BSM", 1))
-    rejected_messages = [
-      ("CONTROL_REQUEST", float('nan')),
-      ("SIGNER_REQUEST", float('nan')),
-    ]
     return {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, pt_bus),
       Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], cam_messages, TSS3_SOURCE_BUS),
       # frames panda rejected are echoed back on bus + 192
-      Bus.loopback: CANParser(DBC[CP.carFingerprint][Bus.pt], rejected_messages, TSS3_CHASSIS_BUS + 192),
+      Bus.loopback: CANParser(DBC[CP.carFingerprint][Bus.pt], [("CONTROL_REQUEST", float('nan'))], TSS3_CHASSIS_BUS + 192),
+      Bus.adas: CANParser(DBC[CP.carFingerprint][Bus.pt], [("SIGNER_REQUEST", float('nan'))], signer_bus + 192),
     }
 
   @staticmethod
