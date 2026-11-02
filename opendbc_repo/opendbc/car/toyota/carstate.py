@@ -416,6 +416,7 @@ class CarState(CarStateBase):
 
   @staticmethod
   def get_can_parsers_tss3(CP):
+    pt_bus = TSS3_SOURCE_BUS if CP.carFingerprint == CAR.TOYOTA_COROLLA_TSS3 else TSS3_CHASSIS_BUS
     pt_messages = [
       ("STEER_ANGLE_SENSOR", 100),
       ("EPS_STATUS", 100),
@@ -448,7 +449,7 @@ class CarState(CarStateBase):
       ("SIGNER_REQUEST", float('nan')),
     ]
     return {
-      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, TSS3_CHASSIS_BUS),
+      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, pt_bus),
       Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], cam_messages, TSS3_SOURCE_BUS),
       # frames panda rejected are echoed back on bus + 192
       Bus.loopback: CANParser(DBC[CP.carFingerprint][Bus.pt], rejected_messages, TSS3_CHASSIS_BUS + 192),

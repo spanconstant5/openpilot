@@ -40,6 +40,10 @@ class CarInterface(CarInterfaceBase):
     if ret.flags & ToyotaFlags.TSS3:
       # the FRC's CONTROL_REQUEST is signed by the EPS, see tss3.py
       ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.TSS3.value
+      if candidate == CAR.TOYOTA_COROLLA_TSS3:
+        # This Corolla's complete native vehicle stream remains on panda bus 2
+        # after safety setup. Bus 0 becomes the host/forwarded output plane.
+        ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.TSS3_RX_BUS_2.value
       ret.dashcamOnly = is_release
       ret.steerAtStandstill = True
 
@@ -116,7 +120,8 @@ class CarInterface(CarInterfaceBase):
     # Detect flipped signals and enable for C-HR and others
     ret.enableBsm = 0x3F6 in fingerprint[0] and candidate in TSS2_CAR
     # BSM comes from the FRC on TSS3
-    if 0x3F6 in fingerprint.get(TSS3_SOURCE_BUS, {}) and ret.flags & ToyotaFlags.TSS3:
+    if (candidate != CAR.TOYOTA_COROLLA_TSS3 and 0x3F6 in fingerprint.get(TSS3_SOURCE_BUS, {}) and
+        ret.flags & ToyotaFlags.TSS3):
       ret.flags |= ToyotaFlags.HAS_BSM.value
       ret.enableBsm = True
 

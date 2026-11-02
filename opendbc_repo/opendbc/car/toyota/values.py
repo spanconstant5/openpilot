@@ -70,6 +70,7 @@ class ToyotaSafetyFlags(IntFlag):
   LTA = (4 << 8)
   SECOC = (8 << 8)
   TSS3 = (16 << 8)
+  TSS3_RX_BUS_2 = (32 << 8)
 
 
 class ToyotaFlags(IntFlag):
