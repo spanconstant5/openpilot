@@ -301,6 +301,53 @@ Run 2026-10-09 with `opendbc_repo/.venv`:
   field validation therefore remain pending, and this archive supports no
   functional code change.
 
+### 2026-11-03 native handoff and engaged-runtime captures
+
+- Bundle `20261103T123619-1667-42448363212` ran the exact clean parent
+  `8b0fbfa2ba`, opendbc `e59da8d8db`, and Panda `f38f504ffa`. Panda's device
+  and rebuilt-file signature prefixes both matched `5423f5e1fdf937be`; the
+  installed payload SHA-256 was
+  `6234bb5bd496a82fabb32c27b56b3db0f1907b5bf6482e4c19f8835153ff69fc`.
+- The native automatic catcher is now proven end to end. It observed exact
+  `50 03` 240.534 ms after ignition, sent `10 02` 0.261 ms later, received
+  exact pending `7F 10 78` 20.304 ms after that, and notified the daemon in
+  time for backend launch 0.623 ms after receipt. The warm installer then
+  received a status-zero signer response in 8.264 ms with all four request
+  fragments accepted and none rejected.
+- The backend nevertheless reported failure because Brake did not support the
+  optional `19 02 FF` DTC query. All supported control-domain observations
+  contained no explicit fault, and this Brake query has been unavailable in
+  the retained Corolla captures. The kit now treats this peer result as an
+  explicit warning, runs the independent fresh signer self-test, and fails only
+  an observed peer fault or failed signer test (kit source `f612bdc`). The
+  vehicle-side daemon also preserves that warning instead of replacing it with
+  a generic success line.
+- Both runtime routes fingerprinted exactly and non-fuzzily as
+  `TOYOTA_COROLLA_TSS3`, used Toyota safety parameter `12873`, kept Panda RX
+  checks valid, and recorded no `canError`, `canBusMissing`, or
+  `controlsMismatch`. MAIN, SET, RES, and CANCEL changed their expected decoded
+  bits. Controls engaged laterally for 1,886 samples in segment 13 and 966 in
+  segment 14; `longActive` and CarControl/CarOutput acceleration remained zero.
+- Segment 13 produced 1,909 status-zero bus-2 `0x7A9` responses and 1,869 host
+  `0x08A` publications. Segment 14 produced 1,009 such responses and 962 host
+  publications. Every host payload in both routes exactly equaled a preceding
+  28-byte `0x777` application plus that request's fresh four-byte response
+  trailer, with 2.226--27.049 ms response-to-publication latency. Panda accepted
+  all 2,831 host publications and rejected none.
+- Each route had one rejected final `0x777` fragment. In both cases the first
+  three fragments were accepted while controls were enabled, then a pedal or
+  steering override disabled controls before the final fragment's receipt.
+  Panda rejected that in-flight fragment and the transport released ownership;
+  no host publication was rejected. This is the intended disengagement safety
+  boundary, not a stable-runtime signer rejection.
+- These are not stationary validation routes: peak speeds were 13.053 and
+  11.744 m/s. With stock longitudinal selected, the host request deliberately
+  copied the FRC request's equal upper/lower longitudinal fields, so they were
+  often nonzero while stock ACC was active. Zero openpilot longitudinal output
+  is proven, but the requested stationary zero-field check is not. Zeroing the
+  copied fields in code would violate the stock-longitudinal safety contract;
+  an actually stationary engaged capture is still required for that criterion.
+
 ## File inventory (merge-base diffs vs commaai master, 2026-10-09)
 
 ### opendbc — 22 files, +2,258 / −57
