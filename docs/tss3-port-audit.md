@@ -232,6 +232,42 @@ Run 2026-10-09 with `opendbc_repo/.venv`:
   is still required to validate payload-matched host `0x08A` publication before
   moving-road validation.
 
+### 2026-11-02 Corolla engagement-attempt capture
+
+- Bundle `20261102T191831-1682-32848698684` ran the exact clean documented
+  parent `ff74fd1dff`, opendbc `e59da8d8db`, and Panda `f38f504ffa`. The Panda
+  signature prefix `5423f5e1fdf937be` again matched the rebuilt firmware. The
+  kit bound the exact Corolla EPS F181, installed the expected
+  `6234bb5bd496a82fabb32c27b56b3db0f1907b5bf6482e4c19f8835153ff69fc`
+  payload, and received a status-zero live-probe response in 66.522 ms with all
+  four transmissions accepted and none rejected.
+- Runtime fingerprinting remained exact and non-fuzzy as
+  `TOYOTA_COROLLA_TSS3`, stock longitudinal remained selected, and Toyota
+  safety parameter `12873` was active. After the 53 startup samples populated
+  the required frames, 5,486 consecutive CarState samples were CAN-valid.
+  Panda's Toyota RX checks remained valid, with no `canError`, `canBusMissing`,
+  or `controlsMismatch` event.
+- The bus-2 signer path again produced 55 uninterrupted status-zero `0x7A9`
+  responses in sequence 1 through 55 over 54.009 seconds. All 220 fragments of
+  the corresponding 55 `0x777` requests had accepted bus-2 receipts, with no
+  bus-194 rejection receipt. The single aggregate `safetyTxBlocked` increment
+  occurred during the ELM327-to-Toyota startup transition and reset to zero in
+  Toyota safety.
+- This was not the missing engaged stationary test. The vehicle shifted through
+  Park, Reverse, Neutral, and briefly Drive, reaching 1.402 m/s. The decoded
+  cruise-main state remained zero, all decoded MAIN/SET/RES/CANCEL button bits
+  remained zero, and no cruise button event was recorded. Consequently
+  SelfdriveState remained disabled, CarControl was never enabled or laterally
+  active, and `CRUISE_OPERATING_LATCH` remained zero.
+- No host `0x08A` was sent. All 2,439 native 32-byte FRC requests matched either
+  their pre-relay bus-0 copy or their post-relay Panda passthrough, and there
+  was no bus-192 host-publication rejection. CarControl and CarOutput
+  acceleration remained exactly 0.0, but host payload matching is still
+  untested. This capture requires no code change: a new test must keep the car
+  stopped in Drive with the service brake held, release the parking brake, turn
+  cruise main on, and issue the normal SET/RES engagement input while retaining
+  stock longitudinal.
+
 ## File inventory (merge-base diffs vs commaai master, 2026-10-09)
 
 ### opendbc — 22 files, +2,258 / −57
