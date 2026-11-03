@@ -268,6 +268,39 @@ Run 2026-10-09 with `opendbc_repo/.venv`:
   cruise main on, and issue the normal SET/RES engagement input while retaining
   stock longitudinal.
 
+### 2026-11-03 Corolla repeated unengaged capture
+
+- Archive `qlog-11.zip` ran the exact clean documented parent `ab872bbab5`,
+  opendbc `e59da8d8db`, and Panda `f38f504ffa`. Its two installer captures both
+  matched Panda signature prefix `5423f5e1fdf937be`, installed the expected
+  signer payload, and received status-zero live-probe responses in 68.668 ms
+  and 74.157 ms. Each probe had four accepted and zero rejected transmissions.
+- Runtime fingerprinting was again exact and non-fuzzy as
+  `TOYOTA_COROLLA_TSS3`, with stock longitudinal and Toyota safety parameter
+  `12873`. After 75 startup samples populated the required frames, all 5,765
+  remaining CarState samples were CAN-valid. There was no `canError`,
+  `canBusMissing`, or `controlsMismatch` event, and Panda's Toyota RX checks
+  remained valid.
+- The signer returned 57 uninterrupted status-zero bus-2 `0x7A9` responses in
+  sequence 1 through 57 over 56.013 seconds. All 228 fragments of the matching
+  57 `0x777` requests had accepted bus-2 receipts and none had a bus-194
+  rejection receipt. Bus 2 reported a historical total-error count of 427 in
+  its first Panda sample, but that value never rose; receive/transmit error
+  counters, warning/passive state, and bus-off all remained zero.
+- This capture also did not engage controls and was not stationary. It reached
+  5.442 m/s while shifting from Park through Reverse to Drive. The cruise-main
+  display state remained zero, the decoded MAIN/SET/RES/CANCEL bits remained
+  unchanged at their released values, no button event was emitted, and the
+  stock `CRUISE_OPERATING_LATCH` remained zero. SelfdriveState therefore stayed
+  disabled and CarControl was never enabled or laterally active.
+- No host `0x08A` was sent or rejected. All 2,442 native FRC requests matched
+  their pre-relay physical bus-0 copy or post-relay Panda passthrough. The stock
+  request's two longitudinal fields varied together from -0.570 to 1.341 m/s²
+  while the vehicle moved, but both openpilot CarControl and CarOutput
+  acceleration remained exactly 0.0. Host-signed payload and zero-longitudinal
+  field validation therefore remain pending, and this archive supports no
+  functional code change.
+
 ## File inventory (merge-base diffs vs commaai master, 2026-10-09)
 
 ### opendbc — 22 files, +2,258 / −57
