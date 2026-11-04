@@ -348,6 +348,34 @@ Run 2026-10-09 with `opendbc_repo/.venv`:
   copied fields in code would violate the stock-longitudinal safety contract;
   an actually stationary engaged capture is still required for that criterion.
 
+### 2026-11-04 post-repin stationary capture: chassis still on bus 1
+
+- Bundle `rlog-18.zip` contains two stationary segments from clean openpilot
+  commit `936f67ffd6cae0452b3f3b1750fa7b85963e800d` on
+  `star2025-kai-clean`. Both exact-match attempts returned `MOCK`, so Panda
+  remained in ELM327 diagnostic safety and the UI correctly kept oracle
+  bringup in its disabled `CHECK HARNESS` state.
+- The physical topology did not change to the required Toyota-B repin. Across
+  both segments, chassis/PT IDs appeared only on bus 1: `0x025` had 11,662
+  frames, `0x0AA` 11,656, `0x101` 5,827, `0x081` 3,885, and native `0x08A`
+  4,661. Buses 0 and 2 instead carried the same bridged CAN-FD camera/FRC
+  family while the interception relay remained closed. This is electrically
+  the unrepinned arrangement, not a transient fingerprint or UI failure.
+- No signer request `0x777` was present. Ten bus-1 `0x7A9` frames in segment
+  18 had no matching signer request and occurred during diagnostic discovery;
+  they are not signer-response evidence. There was no host `0x08A`
+  publication, no controls-allowed sample, and no Toyota safety transition.
+- All 11,141 CarControl samples kept `enabled`, `latActive`, and `longActive`
+  false, with actuator acceleration, gas, and brake exactly zero. The only
+  onroad events were `carUnrecognized`, startup initialization, and
+  `startupNoCar`; there were no `canError`, `canBusMissing`, or
+  `controlsMismatch` events, but that cannot validate Toyota safety while the
+  car is `MOCK`.
+- Do not route around this state in software and do not road-test it. With
+  power removed, correct and retain the complete Toyota-B pair swap so the
+  chassis side is CAN0/bus 0 and the camera/FRC side is CAN2/bus 2, then repeat
+  stationary fingerprint and signer validation.
+
 ## File inventory (merge-base diffs vs commaai master, 2026-10-09)
 
 ### opendbc — 22 files, +2,258 / −57
