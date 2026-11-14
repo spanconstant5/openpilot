@@ -484,23 +484,30 @@ Run 2026-10-09 with `opendbc_repo/.venv`:
   published 6,491 host `0x08A` frames. Every host payload exactly matched its
   application and fresh trailer, Panda accepted all 6,491, and rejected none;
   response-to-publication latency was 2.231--26.358 ms.
-- All 6,491 stock-mode host publications requested lateral result ID 11. The
-  vehicle returned lateral result ID 11 in 1,438 retained `CONTROL_RESULT`
-  frames and never asserted `REQUEST_LOSS`. CarOutput commanded up to 99.993°,
-  the measured and requested angles had 0.912 correlation when laterally
-  active without driver override, and the median absolute separation was
-  1.672°. The logs therefore contradict a missing openpilot/CAN output path;
-  alpha longitudinal is unrelated to lateral authority and is not needed to
-  make steering output. Subjective weak or absent steering now belongs to
-  lateral response/tuning analysis, not signer, publication, longitudinal, or
-  harness-routing changes.
-- No functional change is justified from these moving captures. Preserve the
-  validated harness and bus routing, leave alpha off for lateral-only testing,
-  and obtain the still-missing engaged stationary route before claiming the
-  requested zero host-longitudinal-field criterion. Do not tune angle limits
-  or gains from subjective feel alone; retain a route with a clearly described
-  expected path and driver input so commanded-versus-measured response can be
-  evaluated safely.
+- All 6,491 stock-mode host publications requested lateral result ID 11, and
+  1,438 retained `CONTROL_RESULT` frames reported lateral result ID 11 without
+  `REQUEST_LOSS`. That result is not proof that the host request reached the
+  actuator: the native bus-2 request also used lateral ID 11 in 1,724 frames,
+  so the result cannot be attributed uniquely to the host publication.
+  CarOutput commanded up to 99.993° and the measured/requested angles had
+  0.912 correlation, but the rate limiter itself follows measured angle. When
+  the host target differed from measured angle by more than 5°, measured
+  angle moved toward it after 250 ms in only 55.2% of samples. This proves
+  openpilot generation and Panda transmission, not steering authority.
+- The user's report of no felt actuation therefore keeps the relay-side
+  hypothesis open. Runtime signer requests and EPS responses are on bus 2,
+  while the completed host `0x08A` is transmitted on bus 0. If those are
+  opposite sides of the opened interception relay in this harness, Panda can
+  accept every correctly signed publication without the VMC applying it. This
+  is the specific topology failure previously predicted by the external port
+  author; alpha longitudinal cannot correct it because it changes payload
+  fields, not the publication bus.
+- Do not tune angle limits or gains and do not make a production routing
+  change from these moving captures. Leave alpha off. The next diagnostic must
+  be stationary and must distinguish bus-0 from bus-2 host delivery while
+  retaining safety enforcement; only an observed actuator response may select
+  a publication side. The requested stationary zero-host-longitudinal-field
+  criterion remains outstanding.
 
 ## File inventory (merge-base diffs vs commaai master, 2026-10-09)
 
