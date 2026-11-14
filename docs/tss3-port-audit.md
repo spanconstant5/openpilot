@@ -542,6 +542,51 @@ Run 2026-10-09 with `opendbc_repo/.venv`:
   while stationary and explicitly vary only the host-publication side under
   safety enforcement.
 
+### 2026-11-14 two-route safety restore failure
+
+- The 24 qlog/rlog pairs supplied with bringup bundle
+  `20261114T124935-1690-42163918159` contain two moving routes from clean
+  deployed commit `b4269f6c3d`. The bundle matched Panda's device and signed
+  firmware signatures, retained payload SHA-256
+  `6234bb5bd496a82fabb32c27b56b3db0f1907b5bf6482e4c19f8835153ff69fc`,
+  and passed both installer and independent status-zero signer probes with
+  four accepted and zero rejected fragments. It did not contain the proposed
+  bus-2 host-publication diagnostic; completed host `0x08A` routing remained
+  on bus 0.
+- The first route began at 17:49:43 UTC, fingerprinted exactly as
+  `TOYOTA_COROLLA_TSS3`, selected stock longitudinal, and entered Toyota
+  safety parameter `12873`. It engaged lateral control in multiple retained
+  segments and published thousands of accepted signed host `0x08A` frames on
+  bus 0. CarControl `longActive`, CarControl acceleration, and CarOutput
+  acceleration remained zero throughout. This is further evidence of host
+  generation under the existing routing, not proof of actuator authority.
+- At the end of that route the automatic startup catcher armed for the next
+  ignition and deliberately selected ELM327 safety parameter 1. The second
+  route began at 18:11:15 UTC. Its exact Corolla CarParams again requested
+  Toyota safety parameter `12873`, but every retained PandaState instead
+  remained ELM327 parameter 1. It logged a `10 02` request 0.251 ms after the
+  exact positive `50 03`, then timed out before confirming the PROGRAMMING
+  transition. No subsequent `setting safety model: 2, param: 12873` message
+  appeared.
+- Consequently the second route continuously reported `controlsMismatch`
+  and `signerUnavailable`. It reached 21.78 m/s, but every CarControl sample
+  kept `enabled`, `latActive`, and `longActive` false, Panda never allowed
+  controls, and there were no runtime status-zero `0x7A9` responses or host
+  `0x08A` publications. This directly explains why openpilot did not command
+  the car on that drive; it is independent of the unresolved bus-0/bus-2 host
+  delivery question.
+- Root cause is a stale `PandaSafety::safety_configured_` cache. Pandad used to
+  skip `configureSafetyMode(false)` whenever the startup catcher was active.
+  The catcher therefore changed the hardware to ELM327 offroad without
+  invalidating the previous route's cached Toyota configuration. When the
+  next catch timed out, `configureSafetyMode(true)` incorrectly concluded
+  that safety was already configured and left Panda in ELM327.
+- Pandad now always runs the non-transmitting offroad cache reset even while
+  the startup catcher owns the hardware policy. It still does not overwrite
+  an active catch onroad. Thus a timed-out catch causes the next onroad safety
+  pass to install the current CarParams Toyota policy. A four-state regression
+  test covers active/inactive catcher behavior onroad and offroad.
+
 ## File inventory (merge-base diffs vs commaai master, 2026-10-09)
 
 ### opendbc — 22 files, +2,258 / −57
