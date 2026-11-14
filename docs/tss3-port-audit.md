@@ -376,6 +376,26 @@ Run 2026-10-09 with `opendbc_repo/.venv`:
   chassis side is CAN0/bus 0 and the camera/FRC side is CAN2/bus 2, then repeat
   stationary fingerprint and signer validation.
 
+### 2026-11-13 repeat harness capture: topology unchanged
+
+- `rlog (1).zst` came from the clean deployed documentation commit
+  `34f6e8518fc4e85086d5efed5c18d82eb9997ea2` on
+  `star2025-kai-clean`. Its active 60-second window again fingerprinted as
+  `MOCK`, emitted 60 `carUnrecognized` events, and kept Panda in ELM327 safety
+  for all 600 reported samples.
+- Bus placement is unchanged. Bus 1 carried 81,576 frames, including all
+  chassis/PT traffic: 6,003 `0x025`, 6,000 `0x0AA`, 3,000 `0x101`, 2,000
+  `0x081`, and 2,399 native `0x08A`. Buses 0 and 2 each carried exactly 23,639
+  frames of the same relay-bridged CAN-FD family. The intended car-side CAN0
+  and camera-side CAN2 interception topology is therefore still not present.
+- There were no `sendcan` frames, signer `0x777` requests, `0x7A9` responses,
+  host `0x08A` publications, controls-allowed samples, or Toyota-safety
+  samples. All 6,000 CarControl messages kept `enabled`, `latActive`, and
+  `longActive` false, with acceleration, gas, and brake exactly zero.
+- This repeat rules out a one-off UI or fingerprint transient. No software
+  routing change is appropriate; power-off continuity and terminal-retention
+  checks must prove the complete pair exchange before another stationary run.
+
 ## File inventory (merge-base diffs vs commaai master, 2026-10-09)
 
 ### opendbc — 22 files, +2,258 / −57
