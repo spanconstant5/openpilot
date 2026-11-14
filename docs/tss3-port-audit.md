@@ -396,6 +396,56 @@ Run 2026-10-09 with `opendbc_repo/.venv`:
   routing change is appropriate; power-off continuity and terminal-retention
   checks must prove the complete pair exchange before another stationary run.
 
+### 2026-11-14 repin recovery capture: functional bus-2 topology restored
+
+- Archive `qlog.zip` contains two sequential stationary routes beginning at
+  03:09:47 and 03:10:22 UTC from clean openpilot commit `34f6e8518f` on
+  `star2025-kai-clean`, plus bringup bundle
+  `20261113T221013-1710-65860944588`. Both routes recovered the exact,
+  non-fuzzy `TOYOTA_COROLLA_TSS3` firmware fingerprint, selected stock
+  longitudinal, and used Toyota safety parameter `12873`.
+- The first route preceded the successful RAM install. Its 19 complete
+  bus-2 `0x777` requests produced 76 accepted and zero rejected fragment
+  receipts, but no valid runtime signer response; `signerUnavailable`
+  consequently remained present. The included kit then bound Corolla EPS
+  F181 `8965F1208000 / 8A3111213000`, matched the Panda device and signed-file
+  signature prefix `5423f5e1fdf937be`, and retained payload SHA-256
+  `6234bb5bd496a82fabb32c27b56b3db0f1907b5bf6482e4c19f8835153ff69fc`.
+  Its independent self-test received a status-zero `0x7A9` response in
+  66.724 ms with all four `0x777` fragments accepted and none rejected. The
+  peer-state verdict remained explicitly inconclusive because the optional
+  Brake DTC query timed out; no supported peer-health check reported a fault.
+- The second, post-install route proves stable runtime residency. It completed
+  58 bus-2 signer requests, received all 58 status-zero bus-2 `0x7A9`
+  responses, and recorded all 232 request fragments as accepted with no
+  bus-194 rejection. The only `signerUnavailable` event was the startup sample
+  before the first response. After 39 startup samples populated the required
+  frames, the remaining 5,790 CarState samples were CAN-valid. Panda reported
+  no fault and no invalid Toyota RX check; neither route emitted `canError`,
+  `canBusMissing`, or `controlsMismatch`.
+- The physical side assignment is nevertheless still the bus-2-adapted
+  arrangement, not the intended Toyota-B car-side CAN0 arrangement. In the
+  post-install route, the full-rate `0x025`, `0x0AA`, `0x101`, and `0x081`
+  stream arrived on physical bus 2 after the relay transition and was
+  forwarded to bus 0. This is why the existing Corolla-specific bus-2 parser,
+  safety RX flag, and signer routing now operate again; it does not establish
+  that the requested physical reversal has been completed.
+- Both routes stayed in Park at exactly 0 m/s. Every CarControl and CarOutput
+  acceleration sample was 0.0, and CarControl gas, brake, `enabled`,
+  `latActive`, and `longActive` also remained zero or false. Controls never
+  engaged, so there was no host `sendcan` `0x08A` to payload-match. All 2,439
+  post-install native FRC `0x08A` frames were accounted for by 149 pre-relay
+  bus-0 copies and 2,290 accepted bus-0 passthrough receipts; none is evidence
+  of a host publication. Host-publication rejection and host longitudinal
+  fields therefore remain untested.
+- Do not revert the bus-2 software adaptation against this wiring and do not
+  begin moving-road validation. First prove with power-off continuity that the
+  car/chassis side lands on CAN0 and the camera/FRC side lands on CAN2. Once
+  that physical topology is present, revert the Corolla-specific bus-2 parser,
+  safety RX, and signer routing together, then repeat the engaged stationary
+  test for payload-matched host `0x08A`, zero host-publication rejection, and
+  both host longitudinal fields at zero.
+
 ## File inventory (merge-base diffs vs commaai master, 2026-10-09)
 
 ### opendbc — 22 files, +2,258 / −57
