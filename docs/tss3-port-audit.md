@@ -423,13 +423,13 @@ Run 2026-10-09 with `opendbc_repo/.venv`:
   frames, the remaining 5,790 CarState samples were CAN-valid. Panda reported
   no fault and no invalid Toyota RX check; neither route emitted `canError`,
   `canBusMissing`, or `controlsMismatch`.
-- The physical side assignment is nevertheless still the bus-2-adapted
-  arrangement, not the intended Toyota-B car-side CAN0 arrangement. In the
+- The observed side assignment is the known bus-2-adapted arrangement. In the
   post-install route, the full-rate `0x025`, `0x0AA`, `0x101`, and `0x081`
   stream arrived on physical bus 2 after the relay transition and was
   forwarded to bus 0. This is why the existing Corolla-specific bus-2 parser,
-  safety RX flag, and signer routing now operate again; it does not establish
-  that the requested physical reversal has been completed.
+  safety RX flag, and signer routing operate correctly in this capture. It
+  records the observed topology without treating another in-car repin as a
+  safe or necessary validation step.
 - Both routes stayed in Park at exactly 0 m/s. Every CarControl and CarOutput
   acceleration sample was 0.0, and CarControl gas, brake, `enabled`,
   `latActive`, and `longActive` also remained zero or false. Controls never
@@ -438,13 +438,15 @@ Run 2026-10-09 with `opendbc_repo/.venv`:
   bus-0 copies and 2,290 accepted bus-0 passthrough receipts; none is evidence
   of a host publication. Host-publication rejection and host longitudinal
   fields therefore remain untested.
-- Do not revert the bus-2 software adaptation against this wiring and do not
-  begin moving-road validation. First prove with power-off continuity that the
-  car/chassis side lands on CAN0 and the camera/FRC side lands on CAN2. Once
-  that physical topology is present, revert the Corolla-specific bus-2 parser,
-  safety RX, and signer routing together, then repeat the engaged stationary
-  test for payload-matched host `0x08A`, zero host-publication rejection, and
-  both host longitudinal fields at zero.
+- Preserve this now-functional harness and do not revert the bus-2 software
+  adaptation. The preceding terminal move produced the documented bus-1/MOCK
+  failure, so no further terminal swap should be attempted from software bus
+  observations alone. The next test is an engaged stationary capture on this
+  exact configuration for payload-matched host `0x08A`, zero host-publication
+  rejection, and both host longitudinal fields at zero. If an upstream-style
+  CAN0/CAN2 physical layout is pursued later, first map the disconnected
+  harness end to end with power-off continuity measurements and an unambiguous
+  cavity-numbered pinout; do not trial that change in the car.
 
 ## File inventory (merge-base diffs vs commaai master, 2026-10-09)
 
