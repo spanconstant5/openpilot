@@ -509,6 +509,39 @@ Run 2026-10-09 with `opendbc_repo/.venv`:
   a publication side. The requested stationary zero-host-longitudinal-field
   criterion remains outstanding.
 
+### 2026-11-14 parked follow-up: no control engagement
+
+- Archive `qlog-3.zip`, subsequently supplied as four qlog/rlog pairs and
+  bringup bundle `20261113T225652-1685-39687139932`, ran clean deployed
+  documentation commit `29d73dc50f`, opendbc `e59da8d8db`, and Panda
+  `f38f504ffa`. Both automatic catches matched the signed Panda firmware,
+  retained the expected signer payload, accepted all four independent probe
+  fragments with none rejected, and passed fresh status-zero self-tests in
+  68.985 and 69.304 ms. Neither install changed host publication routing.
+- Both stationary routes fingerprinted exactly as `TOYOTA_COROLLA_TSS3`, used
+  stock longitudinal and Toyota safety parameter `12873`, kept Panda RX checks
+  valid, and reported no Panda fault, `canError`, or `canBusMissing`. Runtime
+  probing remained continuous across the four retained segments: 213 complete
+  bus-2 requests produced 852 accepted fragments, zero rejected fragments,
+  and 213 status-zero responses. The startup `signerUnavailable` sample in
+  each route cleared normally. The one `controlsMismatch` sample coincided
+  with the final Toyota-to-ELM327 transition.
+- This was not a host-delivery or steering-authority diagnostic. All 21,442
+  CarControl samples had `enabled=false`, `latActive=false`, and
+  `longActive=false`; every Panda sample had `controlsAllowed=false`. The car
+  remained in Park at 0 m/s with parking-brake, seatbelt, wrong-gear, and
+  wrong-car-mode no-entry conditions. No host `sendcan` `0x08A` was generated
+  on any bus, so there is no bus-0/bus-2 comparison or actuator-response
+  evidence in this archive.
+- CarControl and CarOutput acceleration, gas, and brake remained zero. The
+  large steering-angle values in the final segment came from manually moving
+  the wheel while controls were disabled; the controller output reference
+  followed measured angle and was limited to 99.993°. Those values are not
+  openpilot steering commands. No functional code or harness change follows
+  from this capture. A valid next diagnostic must actually engage laterally
+  while stationary and explicitly vary only the host-publication side under
+  safety enforcement.
+
 ## File inventory (merge-base diffs vs commaai master, 2026-10-09)
 
 ### opendbc — 22 files, +2,258 / −57
