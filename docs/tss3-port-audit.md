@@ -448,6 +448,60 @@ Run 2026-10-09 with `opendbc_repo/.venv`:
   harness end to end with power-off continuity measurements and an unambiguous
   cavity-numbered pinout; do not trial that change in the car.
 
+### 2026-11-14 engaged stock-longitudinal and alpha diagnostic routes
+
+- The additional route files all ran clean deployed openpilot commit
+  `34f6e8518f` on `star2025-kai-clean` with exact, non-fuzzy Corolla
+  fingerprinting. They are moving-road captures, not the requested stationary
+  validation: peak speed was 15.437 m/s. Panda reported no fault or invalid RX
+  check. The single `controlsMismatch` event occurred at the end of `rlog-4`
+  on the deliberate Toyota-to-ELM327 safety transition, not during stable
+  Toyota safety.
+- The stock-longitudinal `rlog.zst` interval later in the 03:10:22 UTC route
+  engaged lateral control for 2,056 samples. It produced 2,071 complete signer
+  requests, 2,072 status-zero responses (including one response whose request
+  preceded the retained interval), and 2,057 accepted host `0x08A`
+  publications with none rejected. The retained interval payload-matched
+  2,055 publications; the other two began across the omitted segment boundary.
+  Openpilot longitudinal control and acceleration remained zero. The equal
+  host longitudinal fields ranged from -0.214 to -0.004 m/s² because stock
+  mode correctly copied the moving vehicle's native longitudinal request.
+- `rlog-1.zst` and `rlog-2.zst` are one continuous alpha-longitudinal route.
+  The user deliberately enabled alpha after perceiving no openpilot output;
+  it was not a spontaneous parameter or controller transition. CarParams
+  consequently reported `openpilotLongitudinalControl=true`, Toyota safety
+  parameter `12361`, and 5,650 `longActive` CarControl samples. Openpilot
+  acceleration reached 1.780 m/s², and the equal host longitudinal fields
+  ranged from -0.454 to 1.780 m/s². All 5,709 host publications exactly
+  matched their retained 28-byte request and fresh response trailer, all were
+  accepted, and none was rejected. Four signer-fragment rejections occurred
+  across disengagement boundaries; no host publication was rejected.
+- `rlog-3.zst` and `rlog-4.zst` then returned to stock longitudinal and provide
+  direct evidence that openpilot was producing lateral output. CarControl was
+  enabled and `latActive` for 6,510 samples while `longActive`, CarControl
+  acceleration, and CarOutput acceleration remained zero. The transport made
+  6,541 complete signer requests, received 6,527 status-zero responses, and
+  published 6,491 host `0x08A` frames. Every host payload exactly matched its
+  application and fresh trailer, Panda accepted all 6,491, and rejected none;
+  response-to-publication latency was 2.231--26.358 ms.
+- All 6,491 stock-mode host publications requested lateral result ID 11. The
+  vehicle returned lateral result ID 11 in 1,438 retained `CONTROL_RESULT`
+  frames and never asserted `REQUEST_LOSS`. CarOutput commanded up to 99.993°,
+  the measured and requested angles had 0.912 correlation when laterally
+  active without driver override, and the median absolute separation was
+  1.672°. The logs therefore contradict a missing openpilot/CAN output path;
+  alpha longitudinal is unrelated to lateral authority and is not needed to
+  make steering output. Subjective weak or absent steering now belongs to
+  lateral response/tuning analysis, not signer, publication, longitudinal, or
+  harness-routing changes.
+- No functional change is justified from these moving captures. Preserve the
+  validated harness and bus routing, leave alpha off for lateral-only testing,
+  and obtain the still-missing engaged stationary route before claiming the
+  requested zero host-longitudinal-field criterion. Do not tune angle limits
+  or gains from subjective feel alone; retain a route with a clearly described
+  expected path and driver input so commanded-versus-measured response can be
+  evaluated safely.
+
 ## File inventory (merge-base diffs vs commaai master, 2026-10-09)
 
 ### opendbc — 22 files, +2,258 / −57
