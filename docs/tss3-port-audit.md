@@ -640,6 +640,49 @@ Run 2026-10-09 with `opendbc_repo/.venv`:
   and signature prefix `335101b5c85e9b3f`. This is a scoped diagnostic
   change; its first validation must be stationary with stock longitudinal.
 
+### 2026-11-14 bus-2 applied-request validation
+
+- The first follow-up route after the bus-2 publication change ran clean
+  deployed openpilot commit `0ba26c1b55`, opendbc `ce87e6bec3`, and Panda
+  `f38f504ffa`. The automatic bringup matched the rebuilt Panda device and
+  signed-file signature prefix `335101b5c85e9b3f`, retained signer payload
+  SHA-256
+  `6234bb5bd496a82fabb32c27b56b3db0f1907b5bf6482e4c19f8835153ff69fc`,
+  and passed its live and independent probes with status zero. The optional
+  Brake DTC read remained unavailable, leaving peer health inconclusive with
+  no supported peer fault.
+- The route fingerprinted exactly as `TOYOTA_COROLLA_TSS3`, selected stock
+  longitudinal and Toyota safety parameter `12873`, and reported no Panda
+  fault, invalid RX check, `canError`, or `canBusMissing`. The one
+  `signerUnavailable` event was confined to startup. The one rejected signer
+  fragment and final `controlsMismatch` sample occurred at ownership/safety
+  transition boundaries rather than during stable control.
+- Runtime completed 273 bus-2 signer requests and received 272 status-zero
+  bus-2 responses in 5.629--19.401 ms; one final request was still pending at
+  the retained boundary. During the brief engagement, all 159 completed host
+  `0x08A` publications used bus 2, exactly matched their 28-byte application
+  and fresh signer trailer, and produced 159 accepted bus-2 receipts with zero
+  rejected host publications.
+- The applied-result test now passes. All 159 host frames requested lateral ID
+  11. After the first three pre-application result frames, 53 retained
+  `CONTROL_RESULT` frames reported lateral result ID 11 during the 1.59-second
+  host window, with no `REQUEST_LOSS`. This is the result transition that the
+  earlier bus-0 publication failed to produce and validates bus 2 as the
+  Corolla harness's applied control side.
+- Openpilot longitudinal control remained disabled: all 11,448 retained
+  CarControl samples kept `longActive=false`, acceleration, gas, and brake at
+  zero, and CarOutput acceleration also stayed zero. The vehicle nevertheless
+  reached 0.970 m/s, so this was not a strictly stationary test. As required
+  for stock longitudinal continuity, the host copied equal native upper/lower
+  acceleration fields ranging from 0.103 to 0.911 m/s². They are OEM ACC
+  fields, not openpilot longitudinal output; forcing them to zero would break
+  the stock-longitudinal contract.
+- No additional routing, safety, or controller change follows from this
+  capture. Bus-2 publication should remain Corolla-specific. A longer road
+  validation may now be considered only after confirming normal vehicle state
+  and retaining stock longitudinal; it must continue monitoring host receipt
+  rejection, `REQUEST_LOSS`, and Panda RX validity.
+
 ## File inventory (merge-base diffs vs commaai master, 2026-10-09)
 
 ### opendbc — 22 files, +2,258 / −57
