@@ -7,6 +7,7 @@ from openpilot.selfdrive.ui.mici.onroad.augmented_road_view import AugmentedRoad
 from openpilot.selfdrive.ui.ui_state import device, ui_state
 from openpilot.selfdrive.ui.mici.layouts.onboarding import OnboardingWindow
 from openpilot.selfdrive.ui.body.layouts.onroad import BodyLayout
+from openpilot.selfdrive.ui.mici.layouts.settings.tss3_oracle import oracle_bringup_active
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.scroller import Scroller
 from openpilot.system.ui.lib.application import gui_app
@@ -123,13 +124,14 @@ class MiciMainLayout(Scroller):
         self._scroll_to(self._home_layout)
 
     # FIXME: these two pops can interrupt user interacting in the settings
-    if self._onroad_time_delay is not None and rl.get_time() - self._onroad_time_delay >= ONROAD_DELAY:
+    if (self._onroad_time_delay is not None and rl.get_time() - self._onroad_time_delay >= ONROAD_DELAY and
+        not oracle_bringup_active()):
       gui_app.pop_widgets_to(self, lambda: self._scroll_to(self._onroad_layout))
       self._onroad_time_delay = None
 
     # When car leaves standstill, pop nav stack and scroll to onroad
     CS = ui_state.sm["carState"]
-    if not CS.standstill and self._prev_standstill:
+    if not CS.standstill and self._prev_standstill and not oracle_bringup_active():
       gui_app.pop_widgets_to(self, lambda: self._scroll_to(self._onroad_layout))
     self._prev_standstill = CS.standstill
 
