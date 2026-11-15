@@ -106,8 +106,9 @@ class ToyotaFrogPilotFlags(IntFlag):
 
 
 class ToyotaFrogPilotSafetyFlags(IntFlag):
-  UNSUPPORTED_DSU = (16 << 8)
-  GAS_INTERCEPTOR = (32 << 8)
+  # 16 and 32 are reserved by Toyota TSS3.
+  UNSUPPORTED_DSU = (64 << 8)
+  GAS_INTERCEPTOR = (128 << 8)
 
 
 def dbc_dict(pt, radar):
@@ -221,7 +222,7 @@ class CAR(Platforms):
     [ToyotaTSS3CarDocs("Toyota Camry Hybrid 2026")],
     # XV80: 2,825 mm wheelbase from Toyota's 2025 product information.
     # Steer ratio is learned from routes; the Toyota stiffness factor remains paramsd's baseline.
-    CarSpecs(wheelbase=2.825, steerRatio=15.3, tireStiffnessFactor=0.7933),
+    CarSpecs(mass=3400. * CV.LB_TO_KG, wheelbase=2.825, steerRatio=15.3, tireStiffnessFactor=0.7933),
     flags=ToyotaFlags.HYBRID,
   )
   TOYOTA_CHR = PlatformConfig(
@@ -265,7 +266,7 @@ class CAR(Platforms):
       ToyotaTSS3CarDocs("Toyota Corolla 2023"),
       ToyotaTSS3CarDocs("Toyota Corolla Hybrid 2025"),
     ],
-    CarSpecs(wheelbase=2.70, steerRatio=13.9, tireStiffnessFactor=0.444),
+    CarSpecs(mass=3060. * CV.LB_TO_KG, wheelbase=2.70, steerRatio=13.9, tireStiffnessFactor=0.444),
   )
   TOYOTA_HIGHLANDER = PlatformConfig(
     [

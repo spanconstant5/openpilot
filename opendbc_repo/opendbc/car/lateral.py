@@ -24,6 +24,15 @@ class AngleSteeringLimits:
   MAX_ANGLE_RATE: float = math.inf
 
 
+@dataclass
+class AngleSteeringLimitsVM:
+  # Vehicle-model limits used by apply_steer_angle_limits_vm.
+  STEER_ANGLE_MAX: float
+  MAX_LATERAL_ACCEL: float = ISO_LATERAL_ACCEL
+  MAX_LATERAL_JERK: float = ISO_LATERAL_JERK
+  MAX_ANGLE_RATE: float = math.inf
+
+
 def apply_driver_steer_torque_limits(apply_torque: int, apply_torque_last: int, driver_torque: float, LIMITS, steer_max: int = None):
   # some safety modes utilize a dynamic max steer
   if steer_max is None:

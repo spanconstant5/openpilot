@@ -75,10 +75,13 @@ class CarState(CarStateBase):
     self.tss3_brake_module = None
     self.tss3_lkas_hud = {}
     self.tss3_stock_control_request = None
+    self.tss3_stock_pcs = False
     self.tss3_signer_responses = []
     self.tss3_signer_available = False
     self.tss3_signer_request_rejected = False
     self.tss3_control_request_rejected = False
+    self.tss3_request_loss_frames = 0
+    self.tss3_acc_faulted = False
 
     # FrogPilot variables
     self.latActive_previous = False
@@ -141,6 +144,12 @@ class CarState(CarStateBase):
     ret.steeringPressed = abs(ret.steeringTorque) >= TSS3_STEER_DRIVER_TORQUE_THRESHOLD
     ret.steerFaultTemporary = bool(cp.vl["EPS_STATUS"]["EPS_FAULT_INHIBIT"])
 
+    # REQUEST_LOSS also pulses on disengagement. The VMC latches a cruise fault
+    # until restart when it persists for roughly one second.
+    self.tss3_request_loss_frames = self.tss3_request_loss_frames + 1 if cp.vl["CONTROL_RESULT"]["REQUEST_LOSS"] else 0
+    self.tss3_acc_faulted |= self.tss3_request_loss_frames * DT_CTRL >= 1.0
+    ret.accFaulted = self.tss3_acc_faulted
+
     if self.CP.flags & ToyotaFlags.HAS_BSM:
       ret.leftBlindspot = bool(cp_cam.vl["BSM"]["L_ADJACENT"] or cp_cam.vl["BSM"]["L_APPROACHING"])
       ret.rightBlindspot = bool(cp_cam.vl["BSM"]["R_ADJACENT"] or cp_cam.vl["BSM"]["R_APPROACHING"])
@@ -185,7 +194,8 @@ class CarState(CarStateBase):
 
     request = cp_cam.vl["CONTROL_REQUEST"]
     ret.cruiseState.enabled = bool(request["CRUISE_OPERATING_LATCH"])
-    ret.cruiseState.standstill = ret.cruiseState.enabled and bool(request["DELAYED_HOLD_STATE"])
+    # With openpilot longitudinal, the VMC never receives the FRC's hold request.
+    ret.cruiseState.standstill = not self.CP.openpilotLongitudinalControl and ret.cruiseState.enabled and bool(request["DELAYED_HOLD_STATE"])
     ret.cruiseState.available = bool(cp_cam.vl["CRUISE_DISPLAY"]["CRUISE_MAIN_STATE"])
     ret.cruiseState.nonAdaptive = cp_cam.vl["CRUISE_STATUS"]["CRUISE_MODE"] == 2
     ret.cruiseState.speed = request["SET_SPEED"] * CV.KPH_TO_MS
@@ -193,6 +203,12 @@ class CarState(CarStateBase):
     if ret.cruiseState.speed != 0 and cluster_set_speed > 0:
       is_metric = cp.vl["BODY_CONTROL_STATE_2"]["UNITS"] in (1, 2)
       ret.cruiseState.speedCluster = cluster_set_speed * (CV.KPH_TO_MS if is_metric else CV.MPH_TO_MS)
+
+    # PCS braking is requested in the FRC's CONTROL_REQUEST; panda forwards it
+    # to the VMC untouched. Its warning state is carried in PCS_HUD.
+    self.tss3_stock_pcs = bool(request["PCS_BRAKE_REQUEST"])
+    ret.stockAeb = self.tss3_stock_pcs and request["LONGITUDINAL_REQUEST_ACCEL_LOWER"] < 0
+    ret.stockFcw = bool(cp_cam.vl["PCS_HUD"]["FCW"])
 
     return ret
 
@@ -422,6 +438,7 @@ class CarState(CarStateBase):
     pt_messages = [
       ("STEER_ANGLE_SENSOR", 100),
       ("EPS_STATUS", 100),
+      ("CONTROL_RESULT", 40),
       ("WHEEL_SPEEDS", 100),
       ("BRAKE_MODULE", 50),
       ("GAS_PEDAL", 40),
@@ -443,6 +460,7 @@ class CarState(CarStateBase):
       ("CRUISE_DISPLAY", 1),
       ("CRUISE_STATUS", 1),
       ("LKAS_HUD", 1),
+      ("PCS_HUD", 1),
     ]
     if CP.flags & ToyotaFlags.HAS_BSM:
       cam_messages.append(("BSM", 1))
