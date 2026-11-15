@@ -235,6 +235,16 @@ void Panda::can_send(const capnp::List<cereal::CanData>::Reader &can_data_list) 
   });
 }
 
+void Panda::can_send(uint32_t address, const std::string &data, uint8_t bus) {
+  MessageBuilder msg;
+  auto can_list = msg.initEvent().initSendcan(1);
+  auto can = can_list[0];
+  can.setAddress(address);
+  can.setSrc(bus);
+  can.setDat(kj::arrayPtr(reinterpret_cast<const kj::byte *>(data.data()), data.size()));
+  can_send(can_list.asReader());
+}
+
 bool Panda::can_receive(std::vector<can_frame>& out_vec) {
   // Check if enough space left in buffer to store RECV_SIZE data
   assert(receive_buffer_size + RECV_SIZE <= sizeof(receive_buffer));

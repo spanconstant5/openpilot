@@ -5,12 +5,52 @@ import usb1
 import time
 import signal
 import subprocess
+from pathlib import Path
 
 from panda import Panda, PandaDFU, PandaProtocolMismatch, FW_PATH
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
 from openpilot.system.hardware import HARDWARE
 from openpilot.common.swaglog import cloudlog
+
+
+# Cooperative handoff for short-lived direct-Panda tools. SIGWINCH is ignored
+# by an unmodified wrapper, so a mismatched kit fails closed.
+DIRECT_PANDA_LEASE_SIGNAL = signal.SIGWINCH
+DIRECT_PANDA_LEASE_PATH = Path("/tmp/openpilot-pandad-direct-lease")
+DIRECT_PANDA_LEASE_READY_PATH = Path("/tmp/openpilot-pandad-direct-ready")
+TSS3_ORACLE_HANDOFF_EXIT_CODE = 42
+TSS3_ORACLE_LEASE_WAIT_SECONDS = 1.0
+
+
+def _active_direct_panda_lease() -> str | None:
+  try:
+    lease = DIRECT_PANDA_LEASE_PATH.read_text(encoding="utf-8").strip()
+    pid_text, token = lease.split(" ", 1)
+    if not token:
+      raise ValueError("empty direct-Panda lease token")
+    os.kill(int(pid_text), 0)
+    return lease
+  except (FileNotFoundError, ProcessLookupError, PermissionError, ValueError):
+    DIRECT_PANDA_LEASE_PATH.unlink(missing_ok=True)
+    DIRECT_PANDA_LEASE_READY_PATH.unlink(missing_ok=True)
+    return None
+
+
+def _publish_direct_panda_lease_ready(lease: str) -> None:
+  tmp = DIRECT_PANDA_LEASE_READY_PATH.with_name(f".{DIRECT_PANDA_LEASE_READY_PATH.name}.{os.getpid()}")
+  tmp.write_text(lease + "\n", encoding="utf-8")
+  os.replace(tmp, DIRECT_PANDA_LEASE_READY_PATH)
+
+
+def _wait_for_direct_panda_lease(timeout: float) -> str | None:
+  deadline = time.monotonic() + timeout
+  while time.monotonic() < deadline:
+    lease = _active_direct_panda_lease()
+    if lease is not None:
+      return lease
+    time.sleep(0.005)
+  return _active_direct_panda_lease()
 
 
 def get_expected_signature(panda: Panda) -> bytes:
@@ -62,6 +102,10 @@ def flash_panda(panda_serial: str) -> Panda:
 
 
 def main() -> None:
+  process = None
+  do_exit = False
+  direct_lease_requested = False
+
   # signal pandad to close the relay and exit
   def signal_handler(signum, frame):
     cloudlog.info(f"Caught signal {signum}, exiting")
@@ -70,9 +114,34 @@ def main() -> None:
     if process is not None:
       process.send_signal(signal.SIGINT)
 
-  process = None
-  do_exit = False
+  def direct_lease_signal_handler(signum, frame):
+    nonlocal direct_lease_requested
+    lease = _active_direct_panda_lease()
+    if lease is None:
+      cloudlog.warning("Ignoring direct-Panda lease signal without a live lease")
+      return
+    direct_lease_requested = True
+    cloudlog.info(f"Direct-Panda lease requested: {lease}")
+    if process is not None and process.poll() is None:
+      process.send_signal(signal.SIGINT)
+
+  def hold_direct_panda_lease(lease: str) -> None:
+    cloudlog.info(f"Direct-Panda lease ready: {lease}")
+    _publish_direct_panda_lease_ready(lease)
+    try:
+      while not do_exit and _active_direct_panda_lease() == lease:
+        time.sleep(0.05)
+    finally:
+      try:
+        if DIRECT_PANDA_LEASE_READY_PATH.read_text(encoding="utf-8").strip() == lease:
+          DIRECT_PANDA_LEASE_READY_PATH.unlink(missing_ok=True)
+      except FileNotFoundError:
+        pass
+    cloudlog.info(f"Direct-Panda lease released: {lease}")
+
   signal.signal(signal.SIGINT, signal_handler)
+  signal.signal(signal.SIGTERM, signal_handler)
+  signal.signal(DIRECT_PANDA_LEASE_SIGNAL, direct_lease_signal_handler)
 
   count = 0
   first_run = True
@@ -81,6 +150,13 @@ def main() -> None:
 
   while not do_exit:
     try:
+      lease = _active_direct_panda_lease()
+      if direct_lease_requested or lease is not None:
+        direct_lease_requested = False
+        if lease is not None:
+          hold_direct_panda_lease(lease)
+        continue
+
       count += 1
       cloudlog.event("pandad.flash_and_connect", count=count)
       params.remove("PandaSignatures")
@@ -167,7 +243,23 @@ def main() -> None:
     # run pandad with all connected serials as arguments
     os.environ['MANAGER_DAEMON'] = 'pandad'
     process = subprocess.Popen(["./pandad", *panda_serials], cwd=os.path.join(BASEDIR, "selfdrive/pandad"))
-    process.wait()
+    returncode = process.wait()
+    process = None
+    if do_exit:
+      break
+
+    lease = _active_direct_panda_lease()
+    if returncode == TSS3_ORACLE_HANDOFF_EXIT_CODE and lease is None:
+      # Native pandad publishes its marker just before the auto daemon creates
+      # the lease. Bridge that bounded race without resetting Panda.
+      lease = _wait_for_direct_panda_lease(TSS3_ORACLE_LEASE_WAIT_SECONDS)
+    if direct_lease_requested or lease is not None:
+      direct_lease_requested = False
+      if lease is not None:
+        hold_direct_panda_lease(lease)
+      continue
+    if returncode == TSS3_ORACLE_HANDOFF_EXIT_CODE:
+      cloudlog.error("TSS3 oracle catcher exited for handoff, but no cooperative Panda lease arrived")
 
 
 if __name__ == "__main__":

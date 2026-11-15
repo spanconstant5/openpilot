@@ -1,4 +1,5 @@
 #include "selfdrive/pandad/pandad.h"
+#include "selfdrive/pandad/tss3_oracle_startup.h"
 
 #include <algorithm>
 #include <array>
@@ -128,7 +129,7 @@ void can_send_thread(std::vector<Panda *> pandas, bool fake_send) {
   }
 }
 
-void can_recv(std::vector<Panda *> &pandas, PubMaster *pm) {
+void can_recv(std::vector<Panda *> &pandas, PubMaster *pm, Tss3OracleStartupCatcher *startup_catcher) {
   static std::vector<can_frame> raw_can_data;
   {
     bool comms_healthy = true;
@@ -136,6 +137,7 @@ void can_recv(std::vector<Panda *> &pandas, PubMaster *pm) {
     for (const auto& panda : pandas) {
       comms_healthy &= panda->can_receive(raw_can_data);
     }
+    startup_catcher->process_rx(pandas[0], raw_can_data);
 
     MessageBuilder msg;
     auto evt = msg.initEvent();
@@ -205,7 +207,8 @@ void fill_panda_can_state(cereal::PandaState::PandaCanState::Builder &cs, const 
   cs.setCanCoreResetCnt(can_health.can_core_reset_cnt);
 }
 
-std::optional<bool> send_panda_states(PubMaster *pm, const std::vector<Panda *> &pandas, bool is_onroad, bool spoofing_started) {
+std::optional<bool> send_panda_states(PubMaster *pm, const std::vector<Panda *> &pandas, bool is_onroad, bool spoofing_started,
+                                     bool startup_catcher_active) {
   bool ignition_local = false;
   const uint32_t pandas_cnt = pandas.size();
 
@@ -274,7 +277,8 @@ std::optional<bool> send_panda_states(PubMaster *pm, const std::vector<Panda *> 
 
     // set safety mode to NO_OUTPUT when car is off or we're not onroad. ELM327 is an alternative if we want to leverage athenad/connect
     bool should_close_relay = (!ignition_local || !is_onroad) && (nanos_since_boot() - last_door_lock_command_time.load() >= 2e9);
-    if (should_close_relay && (health.safety_mode_pkt != (uint8_t)(cereal::CarParams::SafetyModel::NO_OUTPUT))) {
+    if (!startup_catcher_active && should_close_relay &&
+        (health.safety_mode_pkt != (uint8_t)(cereal::CarParams::SafetyModel::NO_OUTPUT))) {
       panda->set_safety_model(cereal::CarParams::SafetyModel::NO_OUTPUT);
     }
 
@@ -341,14 +345,15 @@ void send_peripheral_state(Panda *panda, PubMaster *pm) {
   pm->send("peripheralState", msg);
 }
 
-void process_panda_state(std::vector<Panda *> &pandas, PubMaster *pm, bool engaged, bool is_onroad, bool spoofing_started) {
+void process_panda_state(std::vector<Panda *> &pandas, PubMaster *pm, bool engaged, bool is_onroad, bool spoofing_started,
+                         bool startup_catcher_active) {
   std::vector<std::string> connected_serials;
   for (Panda *p : pandas) {
     connected_serials.push_back(p->hw_serial());
   }
 
   {
-    auto ignition_opt = send_panda_states(pm, pandas, is_onroad, spoofing_started);
+    auto ignition_opt = send_panda_states(pm, pandas, is_onroad, spoofing_started, startup_catcher_active);
     if (!ignition_opt) {
       LOGE("Failed to get ignition_opt");
       return;
@@ -447,7 +452,7 @@ void process_peripheral_state(Panda *panda, PubMaster *pm, bool no_fan_control) 
   }
 }
 
-void pandad_run(std::vector<Panda *> &pandas) {
+bool pandad_run(std::vector<Panda *> &pandas) {
   const bool no_fan_control = getenv("NO_FAN_CONTROL") != nullptr;
   const bool spoofing_started = getenv("STARTED") != nullptr;
   const bool fake_send = getenv("FAKESEND") != nullptr;
@@ -460,13 +465,21 @@ void pandad_run(std::vector<Panda *> &pandas) {
   SubMaster sm({"selfdriveState"});
   PubMaster pm({"can", "pandaStates", "peripheralState"});
   PandaSafety panda_safety(pandas);
+  Tss3OracleStartupCatcher tss3_startup_catcher;
   Panda *peripheral_panda = pandas[0];
   bool engaged = false;
   bool is_onroad = false;
+  bool oracle_handoff = false;
 
   // Main loop: receive CAN data and process states
   while (!do_exit && check_all_connected(pandas)) {
-    can_recv(pandas, &pm);
+    tss3_startup_catcher.update(pandas[0]);
+    can_recv(pandas, &pm, &tss3_startup_catcher);
+    if (tss3_startup_catcher.caught()) {
+      oracle_handoff = true;
+      do_exit = true;
+      break;
+    }
 
     // Process peripheral state at 20 Hz
     if (rk.frame() % 5 == 0) {
@@ -478,8 +491,10 @@ void pandad_run(std::vector<Panda *> &pandas) {
       sm.update(0);
       engaged = sm.allAliveAndValid({"selfdriveState"}) && sm["selfdriveState"].getSelfdriveState().getEnabled();
       is_onroad = params.getBool("IsOnroad");
-      process_panda_state(pandas, &pm, engaged, is_onroad, spoofing_started);
-      panda_safety.configureSafetyMode(is_onroad);
+      process_panda_state(pandas, &pm, engaged, is_onroad, spoofing_started, tss3_startup_catcher.active());
+      if (should_configure_panda_safety(is_onroad, tss3_startup_catcher.active())) {
+        panda_safety.configureSafetyMode(is_onroad);
+      }
     }
 
     // Send out peripheralState at 2Hz
@@ -504,7 +519,7 @@ void pandad_run(std::vector<Panda *> &pandas) {
   }
 
   // Close relay on exit to prevent a fault
-  if (is_onroad && !engaged) {
+  if (!oracle_handoff && is_onroad && !engaged) {
     for (auto &p : pandas) {
       if (p->connected()) {
         p->set_safety_model(cereal::CarParams::SafetyModel::NO_OUTPUT);
@@ -513,15 +528,17 @@ void pandad_run(std::vector<Panda *> &pandas) {
   }
 
   send_thread.join();
+  return oracle_handoff;
 }
 
-void pandad_main_thread(std::vector<std::string> serials) {
+int pandad_main_thread(std::vector<std::string> serials) {
+  bool oracle_handoff = false;
   if (serials.size() == 0) {
     serials = Panda::list();
 
     if (serials.size() == 0) {
       LOGW("no pandas found, exiting");
-      return;
+      return 0;
     }
   }
 
@@ -547,10 +564,11 @@ void pandad_main_thread(std::vector<std::string> serials) {
 
   if (!do_exit) {
     LOGW("connected to all pandas");
-    pandad_run(pandas);
+    oracle_handoff = pandad_run(pandas);
   }
 
   for (Panda *panda : pandas) {
     delete panda;
   }
+  return oracle_handoff ? TSS3_ORACLE_HANDOFF_EXIT_CODE : 0;
 }

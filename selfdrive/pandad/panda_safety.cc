@@ -74,6 +74,15 @@ void PandaSafety::setSafetyMode(const std::string &params_string) {
       safety_param = safety_configs[i].getSafetyParam();
     }
 
+    // Canonical repinned TSS3 mixes Classical CAN and CAN-FD. Preserve each
+    // packet's explicit frame format instead of sticky bus-wide promotion.
+    constexpr uint16_t TOYOTA_PARAM_TSS3 = 16U << 8;
+    const bool toyota_tss3 = (safety_model == cereal::CarParams::SafetyModel::TOYOTA) &&
+                             ((safety_param & TOYOTA_PARAM_TSS3) != 0U);
+    for (uint16_t bus = 0U; bus < PANDA_CAN_CNT; bus++) {
+      pandas_[i]->set_can_fd_auto(bus, !toyota_tss3);
+    }
+
     LOGW("Panda %d: setting safety model: %d, param: %d, alternative experience: %d", i, (int)safety_model, safety_param, alternative_experience);
     pandas_[i]->set_alternative_experience(alternative_experience);
     pandas_[i]->set_safety_model(safety_model, safety_param);

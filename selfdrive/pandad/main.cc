@@ -17,6 +17,5 @@ int main(int argc, char *argv[]) {
   }
 
   std::vector<std::string> serials(argv + 1, argv + argc);
-  pandad_main_thread(serials);
-  return 0;
+  return pandad_main_thread(serials);
 }

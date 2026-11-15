@@ -6,7 +6,13 @@
 #include "common/params.h"
 #include "selfdrive/pandad/panda.h"
 
-void pandad_main_thread(std::vector<std::string> serials);
+constexpr int TSS3_ORACLE_HANDOFF_EXIT_CODE = 42;
+
+constexpr bool should_configure_panda_safety(bool is_onroad, bool startup_catcher_active) {
+  return !is_onroad || !startup_catcher_active;
+}
+
+int pandad_main_thread(std::vector<std::string> serials);
 
 class PandaSafety {
 public:

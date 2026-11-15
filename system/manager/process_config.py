@@ -59,6 +59,14 @@ def only_onroad(started: bool, params: Params, CP: car.CarParams, frogpilot_togg
 def only_offroad(started: bool, params: Params, CP: car.CarParams, frogpilot_toggles: SimpleNamespace) -> bool:
   return not started
 
+def tss3_oracle_auto(started: bool, params: Params, CP: car.CarParams, frogpilot_toggles: SimpleNamespace) -> bool:
+  # ToyotaFlags.TSS3 is 1 << 12. Automatically enable the bundled signer only
+  # after the persistent fingerprint identifies a TSS3 Toyota.
+  is_tss3 = CP.brand == "toyota" and bool(CP.flags & (1 << 12))
+  if is_tss3 and not params.get_bool("Tss3OracleAutoArm"):
+    params.put_bool("Tss3OracleAutoArm", True)
+  return is_tss3
+
 def or_(*fns):
   return lambda *args: operator.or_(*(fn(*args) for fn in fns))
 
@@ -118,6 +126,7 @@ procs = [
   PythonProcess("dmonitoringd", "selfdrive.monitoring.dmonitoringd", driverview, enabled=(WEBCAM or not PC)),
   PythonProcess("qcomgpsd", "system.qcomgpsd.qcomgpsd", qcomgps, enabled=TICI),
   PythonProcess("pandad", "selfdrive.pandad.pandad", always_run),
+  PythonProcess("tss3oracled", "selfdrive.car.toyota_tss3_oracle_auto", tss3_oracle_auto),
   PythonProcess("paramsd", "selfdrive.locationd.paramsd", only_onroad),
   PythonProcess("lagd", "selfdrive.locationd.lagd", only_onroad),
   PythonProcess("ubloxd", "system.ubloxd.ubloxd", ublox, enabled=TICI),
