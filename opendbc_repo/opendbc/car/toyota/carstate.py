@@ -450,7 +450,7 @@ class CarState(CarStateBase):
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, pt_bus),
       Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], cam_messages, TSS3_SOURCE_BUS),
       # frames panda rejected are echoed back on bus + 192
-      Bus.loopback: CANParser(DBC[CP.carFingerprint][Bus.pt], [("CONTROL_REQUEST", float('nan'))], TSS3_CHASSIS_BUS + 192),
+      Bus.loopback: CANParser(DBC[CP.carFingerprint][Bus.pt], [("CONTROL_REQUEST", float('nan'))], pt_bus + 192),
       Bus.adas: CANParser(DBC[CP.carFingerprint][Bus.pt], [("SIGNER_REQUEST", float('nan'))], signer_bus + 192),
     }
 

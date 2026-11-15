@@ -9,8 +9,9 @@ from opendbc.car.carlog import carlog
 from opendbc.car.toyota import toyotacan
 from opendbc.car.toyota.values import CarControllerParams
 
-# The signed CONTROL_REQUEST is published toward the VMC on bus 0. Corolla's
-# EPS signer stays on bus 2 when the relay opens; the other TSS3 ports use 0.
+# The default signed CONTROL_REQUEST path toward the VMC is bus 0. Corolla's
+# repinned harness has both its EPS signer and applied control path on bus 2;
+# the other TSS3 ports use bus 0.
 TSS3_CHASSIS_BUS = 0
 TSS3_AUX_BUS = 1
 TSS3_SOURCE_BUS = 2
@@ -47,10 +48,12 @@ class SignerTransport:
   sent to the signer, and only lets approved requests be published.
   """
 
-  def __init__(self, packer, stock_longitudinal: bool, signer_bus: int = TSS3_CHASSIS_BUS):
+  def __init__(self, packer, stock_longitudinal: bool, signer_bus: int = TSS3_CHASSIS_BUS,
+               publication_bus: int = TSS3_CHASSIS_BUS):
     self.packer = packer
     self.stock_longitudinal = stock_longitudinal
     self.signer_bus = signer_bus
+    self.publication_bus = publication_bus
     self.pending: OrderedDict[int, SignRequest] = OrderedDict()  # by signer sequence, in request order
     self.next_signer_sequence = 1
     self.next_request_sequence = 0
@@ -132,7 +135,7 @@ class SignerTransport:
       return []
     stock_request = CS.tss3_stock_control_request if self.stock_longitudinal else None
     values = toyotacan.create_tss3_control_request_values(stock_request, False, target_angle_deg_to_raw(angle_deg), False, 0.0, CS.out.vCruise, 0)
-    application = self.packer.make_can_msg("CONTROL_REQUEST", TSS3_CHASSIS_BUS, values)[1][:28]
+    application = self.packer.make_can_msg("CONTROL_REQUEST", self.publication_bus, values)[1][:28]
     self.probe_sequence = self.next_signer_sequence
     self.next_signer_sequence = self.probe_sequence % SIGNER_SEQUENCE_MAX + 1
     self.last_probe_ns = now_ns
@@ -175,7 +178,7 @@ class SignerTransport:
       if not self.active:
         sends.append(toyotacan.create_tss3_signer_arm(self.packer, TSS3_AUX_BUS, True))
         self.active = True
-      sends.append(self.packer.make_can_msg("CONTROL_REQUEST", TSS3_CHASSIS_BUS, request.values | request.trailer))
+      sends.append(self.packer.make_can_msg("CONTROL_REQUEST", self.publication_bus, request.values | request.trailer))
       self.last_publish_ns = now_ns
       self.last_publish_sequence = request.values["REQUEST_SEQUENCE"]
 
@@ -185,7 +188,7 @@ class SignerTransport:
       values = toyotacan.create_tss3_control_request_values(
         stock_request, lat_active, target_angle_deg_to_raw(angle_deg), long_active, accel, CS.out.vCruise, self.next_request_sequence
       )
-      application = self.packer.make_can_msg("CONTROL_REQUEST", TSS3_CHASSIS_BUS, values)[1][:28]
+      application = self.packer.make_can_msg("CONTROL_REQUEST", self.publication_bus, values)[1][:28]
       seq = self.next_signer_sequence
       self.next_signer_sequence = seq % SIGNER_SEQUENCE_MAX + 1
       self.pending.pop(seq, None)
