@@ -691,9 +691,12 @@ SettingsWindow::SettingsWindow(QWidget *parent) : QFrame(parent) {
 
 // FrogPilot variables
 void SettingsWindow::updateDeveloperToggle(int tuningLevel) {
+  Q_UNUSED(tuningLevel);
   for (QAbstractButton *btn : nav_btns->buttons()) {
     if (btn->text() == tr("Developer")) {
-      btn->setVisible(tuningLevel >= 3);
+      // Keep recovery and diagnostics reachable at every FrogPilot tuning
+      // level, matching the stock/openpilot settings layout.
+      btn->setVisible(true);
       break;
     }
   }

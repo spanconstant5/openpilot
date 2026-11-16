@@ -35,3 +35,10 @@ def test_frogpilot_mici_exposes_bundled_tss3_bringup():
   assert '"cancel-requested"' in source
   assert '"tss3-request-signer-ui-status-v1"' in source
   assert "Tss3OracleBigButton()" in settings
+
+
+def test_frogpilot_developer_panel_is_always_reachable():
+  settings = (Path(__file__).parents[1] / "qt" / "offroad" / "settings.cc").read_text(encoding="utf-8")
+  update = settings[settings.index("void SettingsWindow::updateDeveloperToggle") :]
+  assert "btn->setVisible(true)" in update
+  assert "tuningLevel >= 3" not in update
