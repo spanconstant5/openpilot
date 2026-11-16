@@ -43,6 +43,17 @@ Remaining gap: no deterministic offline double drives this boundary, which is wh
 
 ## Validation
 
+### 2026-11-16 first working openpilot milestone
+
+- The user reported openpilot working on the 2025 Corolla at approximately
+  **3,400 miles recorded by the comma device** and **21,100 vehicle miles**.
+- The working build lineage at the time was parent commit
+  `cb622aad4dbc297593425c0a9e468fa88ec317de` with opendbc commit
+  `aa339cbf692adcbf2c3c4f9602dbf845534f0485`.
+- This is a historical mileage and functionality milestone. It does not claim
+  that later clean-PR commits or firmware artifacts were road-tested at those
+  readings.
+
 Run 2026-10-09 with `opendbc_repo/.venv`:
 
 - opendbc Toyota suites (`car/toyota/tests/`, `safety/tests/test_toyota.py`): **318 passed, 124 skipped, 272 subtests passed**. Skips are pre-existing platform/SecOC skips plus the TSS3 controls skip above.
