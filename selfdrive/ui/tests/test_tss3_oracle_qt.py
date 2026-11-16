@@ -8,13 +8,14 @@ def test_frogpilot_qt_exposes_bundled_tss3_bringup():
   assert compatible, detail
 
   source = (Path(__file__).parents[1] / "qt" / "widgets" / "tss3_oracle_control.cc").read_text(encoding="utf-8")
-  utilities = (Path(__file__).parents[3] / "frogpilot" / "ui" / "qt" / "offroad" / "utilities.cc").read_text(encoding="utf-8")
+  frogpilot_settings = (Path(__file__).parents[3] / "frogpilot" / "ui" / "qt" / "offroad" / "frogpilot_settings.cc").read_text(encoding="utf-8")
   assert 'tr("TSS3 Oracle Bringup")' in source
   assert '"ui-bringup"' in source
   assert '"tss3-request-signer-ui-status-v1"' in source
   assert '"cancel-requested"' in source
   assert 'CP.getBrand() == "toyota" && (CP.getFlags() & (1U << 12))' in source
-  assert "addItem(new Tss3OracleControl(this))" in utilities
+  assert "list->addItem(new Tss3OracleControl(this))" in frogpilot_settings
+  assert frogpilot_settings.index("list->addItem(new Tss3OracleControl(this))") < frogpilot_settings.index("createPanelButtons(list)")
 
 
 def test_frogpilot_qt_cancel_is_cooperative():
@@ -24,3 +25,13 @@ def test_frogpilot_qt_cancel_is_cooperative():
   assert "cancel-requested" in bringup
   assert "terminate(" not in bringup
   assert "kill(" not in bringup
+
+
+def test_frogpilot_mici_exposes_bundled_tss3_bringup():
+  root = Path(__file__).parents[3]
+  source = (root / "frogpilot" / "ui" / "mici" / "tss3_oracle.py").read_text(encoding="utf-8")
+  settings = (root / "selfdrive" / "ui" / "mici" / "layouts" / "settings" / "settings.py").read_text(encoding="utf-8")
+  assert '"ui-bringup"' in source
+  assert '"cancel-requested"' in source
+  assert '"tss3-request-signer-ui-status-v1"' in source
+  assert "Tss3OracleBigButton()" in settings

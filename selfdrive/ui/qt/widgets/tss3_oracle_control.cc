@@ -167,7 +167,9 @@ void Tss3OracleControl::refresh() {
   const bool toolAvailable = QFileInfo(oracleToolPath()).isExecutable();
   const bool running = process->state() != QProcess::NotRunning;
   setVisible(true);
-  setEnabled(running || (!uiState()->scene.started && isTss3Vehicle && toolAvailable));
+  // Keep this actionable even when a prerequisite is missing. startBringup()
+  // reports the precise blocker; a disabled button looked like a broken UI.
+  setEnabled(true);
   if (!running) {
     setTitle(tr("TSS3 Oracle Bringup"));
     setText(!toolAvailable ? tr("KIT MISSING") : isTss3Vehicle ? tr("ARM") : tr("CHECK HARNESS"));

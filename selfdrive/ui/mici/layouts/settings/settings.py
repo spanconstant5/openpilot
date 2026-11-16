@@ -5,6 +5,7 @@ from collections.abc import Callable
 
 from openpilot.common.params import Params
 from openpilot.frogpilot.ui.mici.frogpilot_settings import FrogPilotBigButton
+from openpilot.frogpilot.ui.mici.tss3_oracle import Tss3OracleBigButton
 from openpilot.system.ui.widgets.scroller import Scroller
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton
 from openpilot.selfdrive.ui.mici.layouts.settings.toggles import TogglesLayoutMici
@@ -52,6 +53,7 @@ class SettingsLayout(NavWidget):
     self._scroller = Scroller([
       # FrogPilot variables
       FrogPilotBigButton(),
+      Tss3OracleBigButton(),
 
       toggles_btn,
       network_btn,

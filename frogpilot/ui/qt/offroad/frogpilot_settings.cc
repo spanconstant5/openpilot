@@ -1,4 +1,5 @@
 #include "frogpilot/ui/qt/offroad/frogpilot_settings.h"
+#include "selfdrive/ui/qt/widgets/tss3_oracle_control.h"
 #include "frogpilot/ui/qt/offroad/data_settings.h"
 #include "frogpilot/ui/qt/offroad/device_settings.h"
 #include "frogpilot/ui/qt/offroad/lateral_settings.h"
@@ -168,6 +169,10 @@ FrogPilotSettingsWindow::FrogPilotSettingsWindow(SettingsWindow *parent) : QFram
   });
   togglePreset->setCheckedButton(tuningLevel);
   list->addItem(togglePreset, true);
+
+  // Keep Corolla recovery on the first FrogPilot screen. It must remain
+  // reachable when fingerprinting fails and before any tuning-level gates.
+  list->addItem(new Tss3OracleControl(this));
 
   createPanelButtons(list);
 
