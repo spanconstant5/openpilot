@@ -13,7 +13,9 @@ def test_frogpilot_qt_exposes_bundled_tss3_bringup():
   assert '"ui-bringup"' in source
   assert '"tss3-request-signer-ui-status-v1"' in source
   assert '"cancel-requested"' in source
-  assert 'CP.getBrand() == "toyota" && (CP.getFlags() & (1U << 12))' in source
+  assert '"CarParamsPersistent", "CarParamsCache", "CarParamsPrevRoute"' in source
+  assert 'version.find("8965F1208000")' in source
+  assert 'tr("START CAR ONCE")' in source
   assert "list->addItem(new Tss3OracleControl(this))" in frogpilot_settings
   assert frogpilot_settings.index("list->addItem(new Tss3OracleControl(this))") < frogpilot_settings.index("createPanelButtons(list)")
 
@@ -34,6 +36,8 @@ def test_frogpilot_mici_exposes_bundled_tss3_bringup():
   assert '"ui-bringup"' in source
   assert '"cancel-requested"' in source
   assert '"tss3-request-signer-ui-status-v1"' in source
+  assert 'CAROLLA_EPS_FIRMWARE = b"8965F1208000"' in source
+  assert '("CarParamsPersistent", "CarParamsCache", "CarParamsPrevRoute")' in source
   assert "Tss3OracleBigButton()" in settings
 
 

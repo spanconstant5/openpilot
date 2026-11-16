@@ -25,5 +25,5 @@ private:
   QString runDir;
   QString stage;
   bool terminalStatus = false;
-  bool isTss3Vehicle = false;
+  bool targetVerified = false;
 };

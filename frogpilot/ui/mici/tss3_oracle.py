@@ -5,6 +5,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+from cereal import car, messaging
 from openpilot.common.basedir import BASEDIR
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigDialog
@@ -13,11 +14,31 @@ from openpilot.system.ui.lib.application import gui_app
 
 
 TOOL_PATH = Path(BASEDIR) / "selfdrive/car/toyota_tss3_oracle/tss3-request-signer"
+CAROLLA_EPS_FIRMWARE = b"8965F1208000"
+
+
+def _is_verified_corolla_tss3(CP) -> bool:
+  if CP.brand == "toyota" and (bool(CP.flags & (1 << 12)) or CP.carFingerprint == "TOYOTA_COROLLA_TSS3"):
+    return True
+  return any(fw.ecu == "eps" and fw.address == 0x7A1 and CAROLLA_EPS_FIRMWARE in fw.fwVersion for fw in CP.carFw)
+
+
+def _target_verified() -> bool:
+  for key in ("CarParamsPersistent", "CarParamsCache", "CarParamsPrevRoute"):
+    raw = ui_state.params.get(key)
+    if raw is None:
+      continue
+    try:
+      if _is_verified_corolla_tss3(messaging.log_from_bytes(raw, car.CarParams)):
+        return True
+    except Exception:
+      continue
+  return False
 
 
 class Tss3OracleBigButton(BigButton):
   def __init__(self):
-    super().__init__("TSS3 bringup", "check harness")
+    super().__init__("TSS3 bringup", "start car once")
     self._process: subprocess.Popen | None = None
     self._run_dir: Path | None = None
     self._stage = ""
@@ -30,13 +51,13 @@ class Tss3OracleBigButton(BigButton):
     if self._process is not None and self._process.poll() is None:
       return
     self._process = None
-    is_tss3 = ui_state.CP is not None and ui_state.CP.brand == "toyota" and bool(ui_state.CP.flags & (1 << 12))
+    target_verified = _target_verified()
     if not os.access(TOOL_PATH, os.X_OK):
       self.set_value("kit missing")
-    elif is_tss3:
+    elif target_verified:
       self.set_value("arm")
     else:
-      self.set_value("check harness")
+      self.set_value("start car once")
 
   def _clicked(self):
     if self._process is not None and self._process.poll() is None:
@@ -53,8 +74,8 @@ class Tss3OracleBigButton(BigButton):
     self.refresh()
     if ui_state.started:
       gui_app.set_modal_overlay(BigDialog("Turn the vehicle fully off", "TSS3 bringup can only be armed while the vehicle is off and in Park."))
-    elif ui_state.CP is None or ui_state.CP.brand != "toyota" or not bool(ui_state.CP.flags & (1 << 12)):
-      gui_app.set_modal_overlay(BigDialog("Check the harness", "The saved fingerprint is not a Toyota TSS3 platform. Complete fingerprinting first."))
+    elif not _target_verified():
+      gui_app.set_modal_overlay(BigDialog("Verify Corolla first", "Power the car on once and wait for fingerprinting to finish, then turn it fully off and return here. Bringup will not arm an unknown EPS target."))
     elif not os.access(TOOL_PATH, os.X_OK):
       gui_app.set_modal_overlay(BigDialog("TSS3 kit missing", "The bundled request signer is missing or not executable."))
     else:

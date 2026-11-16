@@ -9,6 +9,9 @@
 #include <QJsonObject>
 #include <QProcess>
 
+#include <array>
+#include <string>
+
 #include "cereal/messaging/messaging.h"
 #include "selfdrive/ui/qt/util.h"
 #include "selfdrive/ui/ui.h"
@@ -20,11 +23,29 @@ QString oracleToolPath() {
                          "/../car/toyota_tss3_oracle/tss3-request-signer");
 }
 
+bool isVerifiedCorollaTss3(const cereal::CarParams::Reader &CP) {
+  if (CP.getBrand() == "toyota" &&
+      ((CP.getFlags() & (1U << 12)) || CP.getCarFingerprint() == "TOYOTA_COROLLA_TSS3")) {
+    return true;
+  }
+
+  // Fingerprinting can temporarily fall back to MOCK when the intercepted
+  // network is incomplete. The exact EPS firmware is stronger target evidence
+  // than the aggregate fingerprint and remains available in cached CarParams.
+  for (const auto fw : CP.getCarFw()) {
+    if (fw.getEcu() != cereal::CarParams::Ecu::EPS || fw.getAddress() != 0x7A1) continue;
+    const auto versionBytes = fw.getFwVersion();
+    const std::string version(reinterpret_cast<const char *>(versionBytes.begin()), versionBytes.size());
+    if (version.find("8965F1208000") != std::string::npos) return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 Tss3OracleControl::Tss3OracleControl(QWidget *parent)
     : ButtonControl(
-        tr("TSS3 Oracle Bringup"), tr("CHECK HARNESS"),
+        tr("TSS3 Oracle Bringup"), tr("START CAR ONCE"),
         tr("Install the bundled RAM-only Toyota TSS3 request signer. Keep the vehicle fully off and in Park, tap ARM, then press the brake and POWER normally. No EPS flash writes are performed."),
         parent) {
   process = new QProcess(this);
@@ -72,8 +93,8 @@ void Tss3OracleControl::startBringup() {
     ConfirmationDialog::alert(tr("Turn the vehicle fully off before arming TSS3 Oracle Bringup."), this);
     return;
   }
-  if (!isTss3Vehicle) {
-    ConfirmationDialog::alert(tr("The saved vehicle fingerprint is not a Toyota TSS3 platform. Check the harness and complete fingerprinting first."), this);
+  if (!targetVerified) {
+    ConfirmationDialog::alert(tr("No saved exact Corolla TSS3 identity is available. Power the car on once and wait for fingerprinting to finish, then turn it fully off and return here. Bringup will not arm an unknown EPS target."), this);
     return;
   }
   if (!QFileInfo(toolPath).isExecutable()) {
@@ -155,13 +176,20 @@ void Tss3OracleControl::handleOutput() {
 }
 
 void Tss3OracleControl::refresh() {
-  isTss3Vehicle = false;
-  const std::string cpBytes = params.get("CarParamsPersistent");
-  if (!cpBytes.empty()) {
-    AlignedBuffer alignedBuffer;
-    capnp::FlatArrayMessageReader reader(alignedBuffer.align(cpBytes.data(), cpBytes.size()));
-    const cereal::CarParams::Reader CP = reader.getRoot<cereal::CarParams>();
-    isTss3Vehicle = CP.getBrand() == "toyota" && (CP.getFlags() & (1U << 12));
+  targetVerified = false;
+  for (const char *key : std::array{"CarParamsPersistent", "CarParamsCache", "CarParamsPrevRoute"}) {
+    const std::string cpBytes = params.get(key);
+    if (cpBytes.empty()) continue;
+    try {
+      AlignedBuffer alignedBuffer;
+      capnp::FlatArrayMessageReader reader(alignedBuffer.align(cpBytes.data(), cpBytes.size()));
+      if (isVerifiedCorollaTss3(reader.getRoot<cereal::CarParams>())) {
+        targetVerified = true;
+        break;
+      }
+    } catch (const kj::Exception &) {
+      // Ignore a stale/corrupt cache and continue checking the other sources.
+    }
   }
 
   const bool toolAvailable = QFileInfo(oracleToolPath()).isExecutable();
@@ -172,7 +200,7 @@ void Tss3OracleControl::refresh() {
   setEnabled(true);
   if (!running) {
     setTitle(tr("TSS3 Oracle Bringup"));
-    setText(!toolAvailable ? tr("KIT MISSING") : isTss3Vehicle ? tr("ARM") : tr("CHECK HARNESS"));
+    setText(!toolAvailable ? tr("KIT MISSING") : targetVerified ? tr("ARM") : tr("START CAR ONCE"));
   }
 }
 
