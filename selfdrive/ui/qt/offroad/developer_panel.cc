@@ -1,15 +1,7 @@
 #include "selfdrive/ui/qt/offroad/developer_panel.h"
 #include "selfdrive/ui/qt/widgets/ssh_keys.h"
 #include "selfdrive/ui/qt/widgets/controls.h"
-
-#include <QCoreApplication>
-#include <QDateTime>
-#include <QDir>
-#include <QFile>
-#include <QFileInfo>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QProcess>
+#include "selfdrive/ui/qt/widgets/tss3_oracle_control.h"
 
 // FrogPilot variables
 QMap<int, QString> DeveloperPanel::developerMetricOptions() {
@@ -68,26 +60,7 @@ DeveloperPanel::DeveloperPanel(SettingsWindow *parent) : QFrame(parent) {
   });
   mainList->addItem(longManeuverToggle);
 
-  tss3OracleProcess = new QProcess(this);
-  tss3OracleProcess->setProcessChannelMode(QProcess::MergedChannels);
-  tss3OracleButton = new ButtonControl(
-    tr("TSS3 Oracle Bringup"), tr("CHECK HARNESS"),
-    tr("Install the bundled RAM-only Toyota TSS3 request signer. Keep the vehicle fully off and in Park, tap ARM, then press the brake and POWER normally. No EPS flash writes are performed."));
-  QObject::connect(tss3OracleButton, &ButtonControl::clicked, this, &DeveloperPanel::startTss3OracleBringup);
-  QObject::connect(tss3OracleProcess, &QProcess::readyReadStandardOutput, this, &DeveloperPanel::handleTss3OracleOutput);
-  QObject::connect(tss3OracleProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-                   [this](int exitCode, QProcess::ExitStatus exitStatus) {
-    handleTss3OracleOutput();
-    if (!tss3OracleTerminalStatus) {
-      const QString detail = exitStatus == QProcess::CrashExit
-        ? tr("The bringup backend crashed.")
-        : tr("The bringup backend exited with status %1 without a completion report.").arg(exitCode);
-      tss3OracleButton->setDescription(detail);
-      ConfirmationDialog::alert(tr("TSS3 Oracle Bringup Failed\n\n%1").arg(detail), this);
-    }
-    updateTss3OracleButton();
-  });
-  mainList->addItem(tss3OracleButton);
+  mainList->addItem(new Tss3OracleControl(this));
 
   // Joystick and longitudinal maneuvers should be hidden on release branches
   is_release = false;
@@ -291,7 +264,6 @@ void DeveloperPanel::updateToggles(bool _offroad) {
   bool hasRadar = true;
   bool hideLeadMarker = false;
   bool isAngleCar = false;
-  isTss3Vehicle = false;
 
   // longManeuverToggle should not be toggleable if the car does not have longitudinal control
   auto cp_bytes = params.get("CarParamsPersistent");
@@ -309,13 +281,11 @@ void DeveloperPanel::updateToggles(bool _offroad) {
     hideLeadMarker = CP.getOpenpilotLongitudinalControl() && (CP.getAlphaLongitudinalAvailable() || !params.getBool("DisableOpenpilotLongitudinal")) &&
                      params.getBool("AdvancedCustomUI") && params.getBool("HideLeadMarker") && !params.getBool("DebugMode");
     isAngleCar = CP.getSteerControlType() == cereal::CarParams::SteerControlType::ANGLE;
-    isTss3Vehicle = CP.getBrand() == "toyota" && (CP.getFlags() & (1U << 12));
   } else {
     longManeuverToggle->setEnabled(false);
   }
 
   offroad = _offroad;
-  updateTss3OracleButton();
 
   // FrogPilot variables
   int tuningLevel = params.getInt("TuningLevel");
@@ -370,129 +340,6 @@ void DeveloperPanel::updateToggles(bool _offroad) {
   openDescriptions(forceOpenDescriptions, toggles);
 
   update();
-}
-
-void DeveloperPanel::startTss3OracleBringup() {
-  if (tss3OracleProcess->state() != QProcess::NotRunning) {
-    if (tss3OracleStage == "arming" || tss3OracleStage == "armed") {
-      QFile cancelFile(QDir(tss3OracleRunDir).filePath("cancel-requested"));
-      if (cancelFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        cancelFile.write("cancel\n");
-        cancelFile.close();
-        tss3OracleButton->setText(tr("CANCELING"));
-        tss3OracleButton->setDescription(tr("A cooperative cancellation was requested before PROGRAMMING."));
-      } else {
-        ConfirmationDialog::alert(tr("Could not request cooperative cancellation. Leave the device connected and let bringup finish."), this);
-      }
-    } else {
-      ConfirmationDialog::alert(tr("Bringup has passed the safe cancellation point. Leave the device connected and let it finish."), this);
-    }
-    return;
-  }
-
-  const QString toolPath = QDir::cleanPath(QCoreApplication::applicationDirPath() +
-    "/../car/toyota_tss3_oracle/tss3-request-signer");
-  if (uiState()->scene.started) {
-    ConfirmationDialog::alert(tr("Turn the vehicle fully off before arming TSS3 Oracle Bringup."), this);
-    return;
-  }
-  if (!isTss3Vehicle) {
-    ConfirmationDialog::alert(tr("The saved vehicle fingerprint is not a Toyota TSS3 platform. Check the harness and complete fingerprinting first."), this);
-    return;
-  }
-  if (!QFileInfo(toolPath).isExecutable()) {
-    ConfirmationDialog::alert(tr("The bundled TSS3 oracle kit is missing or not executable."), this);
-    return;
-  }
-  if (!ConfirmationDialog::confirm(
-        tr("Keep the vehicle fully off and in Park. After tapping ARM, press the brake and POWER normally. The signer is loaded into volatile RAM only; no EPS flash writes are performed."),
-        tr("ARM"), this)) {
-    return;
-  }
-
-  tss3OracleRunDir = QString("/data/tss3-oracle-runs/%1-%2-%3")
-    .arg(QDateTime::currentDateTime().toString("yyyyMMddThhmmss"))
-    .arg(QCoreApplication::applicationPid())
-    .arg(QDateTime::currentMSecsSinceEpoch());
-  if (!QDir().mkpath(tss3OracleRunDir)) {
-    ConfirmationDialog::alert(tr("Could not create the TSS3 bringup report directory."), this);
-    return;
-  }
-
-  tss3OracleOutputBuffer.clear();
-  tss3OracleStage = "arming";
-  tss3OracleTerminalStatus = false;
-  tss3OracleButton->setText(tr("CANCEL"));
-  tss3OracleButton->setDescription(tr("Arming the startup catcher. Tap CANCEL only before PROGRAMMING."));
-  tss3OracleProcess->setWorkingDirectory(QFileInfo(toolPath).absolutePath());
-  tss3OracleProcess->start(toolPath, {"ui-bringup", tss3OracleRunDir});
-  if (!tss3OracleProcess->waitForStarted(1500)) {
-    const QString detail = tss3OracleProcess->errorString();
-    tss3OracleTerminalStatus = true;
-    tss3OracleButton->setDescription(detail);
-    ConfirmationDialog::alert(tr("Could not start TSS3 Oracle Bringup.\n\n%1").arg(detail), this);
-    updateTss3OracleButton();
-  }
-}
-
-void DeveloperPanel::handleTss3OracleOutput() {
-  tss3OracleOutputBuffer.append(tss3OracleProcess->readAllStandardOutput());
-  while (true) {
-    const int newline = tss3OracleOutputBuffer.indexOf('\n');
-    if (newline < 0) break;
-
-    const QByteArray line = tss3OracleOutputBuffer.left(newline).trimmed();
-    tss3OracleOutputBuffer.remove(0, newline + 1);
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(line, &parseError);
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()) continue;
-
-    const QJsonObject status = document.object();
-    if (status.value("schema").toString() != "tss3-request-signer-ui-status-v1") continue;
-    const QString stage = status.value("stage").toString();
-    const QString title = status.value("title").toString();
-    const QString detail = status.value("detail").toString();
-    const int progress = status.value("progress").toInt(-1);
-    const bool done = status.value("done").toBool(false);
-    const bool error = status.value("error").toBool(false);
-    if (stage.isEmpty() || title.isEmpty() || detail.isEmpty() || progress < 0 || progress > 100 ||
-        done != (stage == "done") || error != (stage == "error")) {
-      continue;
-    }
-
-    tss3OracleStage = stage;
-    tss3OracleTerminalStatus = done || error;
-    tss3OracleButton->setTitle(title);
-    tss3OracleButton->setDescription(tr("%1% — %2").arg(progress).arg(detail));
-    if (done) {
-      tss3OracleButton->setText(tr("DONE"));
-      ConfirmationDialog::alert(tr("TSS3 Oracle Bringup Complete\n\n%1").arg(detail), this);
-    } else if (error) {
-      tss3OracleButton->setText(tr("ERROR"));
-      ConfirmationDialog::alert(tr("TSS3 Oracle Bringup Failed\n\n%1").arg(detail), this);
-    } else if (stage == "arming" || stage == "armed") {
-      tss3OracleButton->setText(tr("CANCEL"));
-    } else {
-      tss3OracleButton->setText(tr("%1%").arg(progress));
-    }
-  }
-}
-
-void DeveloperPanel::updateTss3OracleButton() {
-  const QString toolPath = QDir::cleanPath(QCoreApplication::applicationDirPath() +
-    "/../car/toyota_tss3_oracle/tss3-request-signer");
-  const bool toolAvailable = QFileInfo(toolPath).isExecutable();
-  const bool running = tss3OracleProcess->state() != QProcess::NotRunning;
-
-  // Keep the diagnostic visible whenever the bundled tool exists. This makes
-  // a missing fingerprint or harness-side problem visible instead of silently
-  // removing the only recovery control.
-  tss3OracleButton->setVisible(toolAvailable || isTss3Vehicle);
-  tss3OracleButton->setEnabled(running || (offroad && isTss3Vehicle && toolAvailable));
-  if (!running) {
-    tss3OracleButton->setTitle(tr("TSS3 Oracle Bringup"));
-    tss3OracleButton->setText(!toolAvailable ? tr("KIT MISSING") : isTss3Vehicle ? tr("ARM") : tr("CHECK HARNESS"));
-  }
 }
 
 void DeveloperPanel::showEvent(QShowEvent *event) {

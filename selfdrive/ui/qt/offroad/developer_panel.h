@@ -1,13 +1,8 @@
 #pragma once
 
-#include <QByteArray>
-#include <QString>
-
 #include "selfdrive/ui/qt/offroad/settings.h"
 
 #include "frogpilot/ui/qt/offroad/frogpilot_settings.h"
-
-class QProcess;
 
 class DeveloperPanel : public QFrame {
   Q_OBJECT
@@ -21,21 +16,10 @@ signals:
   void openSubSubPanel();
 
 private:
-  void handleTss3OracleOutput();
-  void startTss3OracleBringup();
-  void updateTss3OracleButton();
-
   Params params;
   ParamControl* adbToggle;
   ParamControl* joystickToggle;
   ParamControl* longManeuverToggle;
-  ButtonControl *tss3OracleButton;
-  QProcess *tss3OracleProcess;
-  QByteArray tss3OracleOutputBuffer;
-  QString tss3OracleRunDir;
-  QString tss3OracleStage;
-  bool tss3OracleTerminalStatus = false;
-  bool isTss3Vehicle = false;
   bool is_release;
   bool offroad = false;
 
