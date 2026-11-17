@@ -19,6 +19,7 @@ legend = ["LAT_ACCEL_FACTOR", "MAX_LAT_ACCEL_MEASURED", "FRICTION"]
 
 # Toyota LTA also has torque
 "TOYOTA_RAV4_TSS2_2023" = [nan, 3.0, nan]
+"TOYOTA_COROLLA_TSS3" = [nan, 3.0, nan]
 "TOYOTA_MATRIX_RETROFIT" = [4.05, 1.84, 0.10]
 "TOYOTA_RAV4_PRIME" = [1.7, 2.0, 0.14]
 
