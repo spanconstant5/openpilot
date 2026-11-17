@@ -1,8 +1,11 @@
 from openpilot.common.params import Params
+from openpilot.selfdrive.car.toyota_tss3_oracle_kit import oracle_ui_state
+from openpilot.selfdrive.ui.layouts.settings.tss3_oracle import Tss3OracleBringupDialog
+from openpilot.selfdrive.ui.tss3_oracle_runner import tool_available
 from openpilot.selfdrive.ui.widgets.ssh_key import ssh_key_item
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.widgets import Widget
-from openpilot.system.ui.widgets.list_view import toggle_item
+from openpilot.system.ui.widgets.list_view import button_item, toggle_item
 from openpilot.system.ui.widgets.scroller_tici import Scroller
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
 from openpilot.system.ui.lib.application import gui_app
@@ -24,6 +27,10 @@ DESCRIPTIONS = {
     "On this car, openpilot defaults to the car's built-in ACC instead of openpilot's longitudinal control. " +
     "Enable this to switch to openpilot longitudinal control. Enabling Experimental mode is recommended when enabling openpilot longitudinal control alpha. " +
     "Changing this setting will restart openpilot if the car is powered on."
+  ),
+  'tss3_oracle_manual': tr_noop(
+    "2025 Corolla TSS3 RAM signer. Arm while the vehicle is fully off and in Park, then press the brake and POWER normally. " +
+    "The resident is volatile and must be loaded again after the EPS loses power. No EPS flash writes are performed."
   ),
 }
 
@@ -68,6 +75,18 @@ class DeveloperLayout(Widget):
       enabled=lambda: not ui_state.engaged,
     )
 
+    self._tss3_oracle_button = button_item(
+      lambda: tr("TSS3 Signer Bringup"),
+      lambda: tr(oracle_ui_state(
+        ui_state.CP.carFingerprint if ui_state.CP is not None else None,
+        is_release=False,
+        tool_available=tool_available(),
+      )[2]),
+      description=lambda: tr(DESCRIPTIONS["tss3_oracle_manual"]),
+      callback=self._on_tss3_oracle_bringup,
+      enabled=lambda: ui_state.is_offroad() and not ui_state.engaged,
+    )
+
     self._ui_debug_toggle = toggle_item(
       lambda: tr("UI Debug Mode"),
       description="",
@@ -82,6 +101,7 @@ class DeveloperLayout(Widget):
       self._ssh_keys,
       self._joystick_toggle,
       self._alpha_long_toggle,
+      self._tss3_oracle_button,
       self._ui_debug_toggle,
     ], line_separator=True, spacing=0)
 
@@ -110,6 +130,15 @@ class DeveloperLayout(Widget):
     else:
       self._alpha_long_toggle.set_visible(False)
 
+    fingerprint = ui_state.CP.carFingerprint if ui_state.CP is not None else None
+    _, tss3, _ = oracle_ui_state(fingerprint, is_release=False, tool_available=tool_available())
+    # Keep the diagnostic visible in Developer even when fingerprinting failed;
+    # it remains disabled until live CarParams identifies this TSS3 platform.
+    self._tss3_oracle_button.set_visible(True)
+    self._tss3_oracle_button.action_item.set_enabled(
+      lambda: tss3 and tool_available() and ui_state.is_offroad() and not ui_state.engaged
+    )
+
     # TODO: make a param control list item so we don't need to manage internal state as much here
     # refresh toggles from params to mirror external changes
     for key, item in (
@@ -125,6 +154,10 @@ class DeveloperLayout(Widget):
     self._params.put_bool("ShowDebugInfo", state)
     gui_app.set_show_touches(state)
     gui_app.set_show_fps(state)
+
+  def _on_tss3_oracle_bringup(self):
+    if ui_state.is_offroad():
+      gui_app.push_widget(Tss3OracleBringupDialog())
 
   def _on_enable_adb(self, state: bool):
     self._params.put_bool("AdbEnabled", state)

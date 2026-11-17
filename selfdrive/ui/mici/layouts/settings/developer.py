@@ -1,4 +1,7 @@
 from openpilot.common.time_helpers import system_time_valid
+from openpilot.selfdrive.car.toyota_tss3_oracle_kit import oracle_ui_state
+from openpilot.selfdrive.ui.mici.layouts.settings.tss3_oracle import Tss3OracleBringupPage
+from openpilot.selfdrive.ui.tss3_oracle_runner import tool_available
 from openpilot.system.ui.widgets.scroller import NavScroller
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, BigToggle, BigParamControl, BigCircleParamControl
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigDialog, BigInputDialog
@@ -56,6 +59,8 @@ class DeveloperLayoutMici(NavScroller):
     self._alpha_long_toggle = BigToggle("alpha longitudinal",
                                         initial_state=ui_state.params.get_bool("AlphaLongitudinalEnabled"),
                                         toggle_callback=self._on_alpha_long_enabled)
+    self._tss3_oracle_button = BigButton("TSS3 signer bringup", "checking vehicle")
+    self._tss3_oracle_button.set_click_callback(self._on_tss3_oracle_bringup)
     self._debug_mode_toggle = BigParamControl("ui debug mode", "ShowDebugInfo",
                                               toggle_callback=lambda checked: (gui_app.set_show_touches(checked),
                                                                                gui_app.set_show_fps(checked)))
@@ -67,6 +72,7 @@ class DeveloperLayoutMici(NavScroller):
       self._disable_wide_road_toggle,
       self._joystick_toggle,
       self._alpha_long_toggle,
+      self._tss3_oracle_button,
       self._debug_mode_toggle,
     ])
 
@@ -127,6 +133,18 @@ class DeveloperLayoutMici(NavScroller):
     else:
       self._alpha_long_toggle.set_visible(False)
 
+    fingerprint = ui_state.CP.carFingerprint if ui_state.CP is not None else None
+    _, tss3, oracle_label = oracle_ui_state(
+      fingerprint, is_release=False, tool_available=tool_available(),
+    )
+    # Always expose the diagnostic in Developer; CHECK HARNESS and KIT MISSING
+    # are useful states even when the action itself must remain disabled.
+    self._tss3_oracle_button.set_visible(True)
+    self._tss3_oracle_button.set_enabled(
+      lambda: tss3 and tool_available() and ui_state.is_offroad() and not ui_state.engaged
+    )
+    self._tss3_oracle_button.set_value(oracle_label)
+
     # Refresh toggles from params to mirror external changes
     for key, item in self._refresh_toggles:
       item.set_checked(ui_state.params.get_bool(key))
@@ -135,6 +153,10 @@ class DeveloperLayoutMici(NavScroller):
     ui_state.params.put_bool("JoystickDebugMode", state)
     ui_state.params.put_bool("LongitudinalManeuverMode", False)
     ui_state.params.put_bool("LateralManeuverMode", False)
+
+  def _on_tss3_oracle_bringup(self):
+    if ui_state.is_offroad():
+      gui_app.push_widget(Tss3OracleBringupPage())
 
   def _on_alpha_long_enabled(self, state: bool):
     # TODO: show confirmation dialog before enabling
