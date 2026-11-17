@@ -11,6 +11,10 @@ RADAR_ACC_TSSP_CAR = {CAR.TOYOTA_CAMRY}
 TSSP_CLUSTER_MSGS = list(range(0x680, 0x686))
 KPH_TO_MS = 1. / 3.6
 TSSP_RADAR_EGO_SPEED_SCALE = 0.922
+TSS3_GEOMETRY_MSGS = [0x180, 0x181, 0x182]
+TSS3_MOTION_MSGS = [0x183, 0x184, 0x185]
+TSS3_SLOTS = 8
+TSS3_DIST_INVALID = 0xFFF8 * 0.005
 
 
 def _create_radar_can_parser(car_fingerprint):
@@ -28,6 +32,11 @@ def _create_radar_can_parser(car_fingerprint):
   return CANParser(DBC[car_fingerprint][Bus.radar], messages, 1)
 
 
+def _create_tss3_radar_can_parser(car_fingerprint):
+  messages = [(msg, 20) for msg in TSS3_GEOMETRY_MSGS + TSS3_MOTION_MSGS]
+  return CANParser(DBC[car_fingerprint][Bus.radar], messages, 1)
+
+
 def _create_tssp_radar_can_parser(car_fingerprint):
   return CANParser(DBC[car_fingerprint][Bus.radar], [(addr, 10) for addr in TSSP_CLUSTER_MSGS], 1)
 
@@ -40,9 +49,14 @@ class RadarInterface(RadarInterfaceBase):
   def __init__(self, CP):
     super().__init__(CP)
     self.track_id = 0
+    self.tss3 = bool(CP.flags & ToyotaFlags.TSS3)
     self.radar_acc_tssp = CP.carFingerprint in RADAR_ACC_TSSP_CAR
     self.ars510 = None
-    if CP.carFingerprint in ARS510_RADAR_CAR and CP.flags & ToyotaFlags.ARS510_RADAR and not CP.radarUnavailable:
+    if self.tss3:
+      self.rcp = None if CP.radarUnavailable else _create_tss3_radar_can_parser(CP.carFingerprint)
+      self.pt_cp = None
+      self.trigger_msg = TSS3_MOTION_MSGS[-1]
+    elif CP.carFingerprint in ARS510_RADAR_CAR and CP.flags & ToyotaFlags.ARS510_RADAR and not CP.radarUnavailable:
       parser = Ars510FusedRadarInterface if CP.flags & ToyotaFlags.ARS510_FUSED else Ars510AccRadarInterface
       self.ars510 = parser(CP)
       self.rcp = self.pt_cp = None
@@ -135,10 +149,45 @@ class RadarInterface(RadarInterfaceBase):
     return ret
 
   def _update(self, updated_messages):
+    if self.tss3:
+      return self._update_tss3(updated_messages)
     if self.radar_acc_tssp:
       return self._update_tssp(updated_messages)
 
     return self._update_denso(updated_messages)
+
+  def _update_tss3(self, updated_messages):
+    ret = RadarData()
+    if not self.rcp.can_valid:
+      ret.errors.canError = True
+      self.pts.clear()
+      return ret
+
+    for bank, (geometry_addr, motion_addr) in enumerate(zip(TSS3_GEOMETRY_MSGS, TSS3_MOTION_MSGS, strict=True)):
+      if motion_addr not in updated_messages:
+        continue
+      geometry, motion = self.rcp.vl[geometry_addr], self.rcp.vl[motion_addr]
+      for slot in range(TSS3_SLOTS):
+        key = bank * TSS3_SLOTS + slot
+        new, ended = motion[f'NEW_TRACK_{slot}'], motion[f'TRACK_ENDED_{slot}']
+        dist = geometry[f'DIST_{slot}']
+        valid = motion[f'TRACK_STATE_{slot}'] != 0 and 0 < dist < TSS3_DIST_INVALID and (new or not ended)
+
+        if new or ended or not valid:
+          self.pts.pop(key, None)
+        if not valid or geometry_addr not in updated_messages:
+          continue
+
+        if key not in self.pts:
+          self.pts[key] = RadarData.RadarPoint()
+          self.pts[key].trackId = self.track_id
+          self.track_id += 1
+        self.pts[key].dRel = dist
+        self.pts[key].yRel = geometry[f'LAT_{slot}']
+        self.pts[key].vRel = motion[f'VREL_{slot}']
+
+    ret.points = list(self.pts.values())
+    return ret
 
   def _update_denso(self, updated_messages):
     ret = RadarData()

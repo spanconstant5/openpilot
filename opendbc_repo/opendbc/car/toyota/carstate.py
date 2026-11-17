@@ -8,7 +8,8 @@ from opendbc.car.common.filter_simple import FirstOrderFilter
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.toyota.values import ToyotaFlags, ToyotaStarPilotFlags, CAR, DBC, STEER_THRESHOLD, NO_STOP_TIMER_CAR, \
                                                   TSS2_CAR, RADAR_ACC_CAR, EPS_SCALE, UNSUPPORTED_DSU_CAR, \
-                                                  SECOC_CAR, LEGACY_PRIUS_CAR
+                                                  SECOC_CAR, LEGACY_PRIUS_CAR, TSS3_STEER_DRIVER_TORQUE_THRESHOLD
+from opendbc.car.toyota.tss3 import TSS3_CHASSIS_BUS, TSS3_SOURCE_BUS
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
 
 ButtonType = structs.CarState.ButtonEvent.Type
@@ -61,10 +62,11 @@ class CarState(CarStateBase):
     self.cluster_speed_hyst_gap = CV.KPH_TO_MS / 2.
     self.cluster_min_speed = CV.KPH_TO_MS / 2.
 
-    if CP.flags & ToyotaFlags.SECOC.value:
-      self.shifter_values = can_define.dv["GEAR_PACKET_HYBRID"]["GEAR"]
+    if CP.flags & ToyotaFlags.SECOC.value or (CP.flags & ToyotaFlags.TSS3 and CP.flags & ToyotaFlags.HYBRID):
+      self.gear_message = "GEAR_PACKET_HYBRID"
     else:
-      self.shifter_values = can_define.dv["GEAR_PACKET"]["GEAR"]
+      self.gear_message = "GEAR_PACKET"
+    self.shifter_values = can_define.dv[self.gear_message]["GEAR"]
 
     # On cars with cp.vl["STEER_TORQUE_SENSOR"]["STEER_ANGLE"]
     # the signal is zeroed to where the steering angle is at start.
@@ -82,6 +84,18 @@ class CarState(CarStateBase):
     self.lkas_hud = {}
     self.gvc = 0.0
     self.secoc_synchronization = None
+    self.tss3_brake_module = None
+    self.tss3_lkas_hud = {}
+    self.tss3_stock_control_request = None
+    self.tss3_stock_pcs = False
+    self.tss3_signer_responses = []
+    self.tss3_signer_available = False
+    self.tss3_signer_request_rejected = False
+    self.tss3_control_request_rejected = False
+    self.tss3_request_loss_frames = 0
+    self.tss3_acc_faulted = False
+    self.tss3_cruise_button = 0
+    self.tss3_lta_switch_state = None
 
     self.latActive_previous = False
     self.needs_angle_offset_zss = False
@@ -97,7 +111,116 @@ class CarState(CarStateBase):
     )
     self.pre_collision_2 = {}
 
+  def update_tss3(self, can_parsers) -> tuple[structs.CarState, custom.StarPilotCarState]:
+    cp = can_parsers[Bus.pt]
+    cp_cam = can_parsers[Bus.cam]
+    cp_control_rejected = can_parsers[Bus.loopback]
+    cp_signer_rejected = can_parsers[Bus.adas]
+    ret = structs.CarState()
+    fp_ret = custom.StarPilotCarState.new_message()
+
+    ret.signerUnavailable = not self.tss3_signer_available
+    responses = cp.vl_all["SIGNER_RESPONSE"]
+    self.tss3_signer_responses = [{sig: vals[i] for sig, vals in responses.items()}
+                                  for i in range(len(responses["SIGNER_SEQUENCE"]))]
+    self.tss3_stock_control_request = copy.copy(cp_cam.vl["CONTROL_REQUEST"])
+    self.tss3_signer_request_rejected = any(int(header) >> 4 == 0xB
+                                             for header in cp_signer_rejected.vl_all["SIGNER_REQUEST"]["HEADER"])
+    self.tss3_control_request_rejected = len(cp_control_rejected.vl_all["CONTROL_REQUEST"]["REQUEST_SEQUENCE"]) > 0
+
+    self.tss3_brake_module = copy.copy(cp.vl["BRAKE_MODULE"])
+    if cp_cam.vl_all["LKAS_HUD"]["LTA_MODE"]:
+      self.tss3_lkas_hud = copy.copy(cp_cam.vl["LKAS_HUD"])
+    ret.brakePressed = self.tss3_brake_module["BRAKE_PRESSED"] != 0
+    ret.gasPressed = cp.vl["GAS_PEDAL"]["GAS_PEDAL_USER"] > 0
+    self.parse_wheel_speeds(ret,
+      cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_FL"], cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_FR"],
+      cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_RL"], cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_RR"],
+    )
+    ret.vEgoCluster = cp.vl["BODY_CONTROL_STATE_2"]["UI_SPEED"] * CV.KPH_TO_MS
+    ret.standstill = abs(ret.vEgoRaw) < 1e-3
+    ret.vehicleSensorsInvalid = any(cp.vl["WHEEL_SPEEDS"][f"WHEEL_SPEED_{wheel}_FAULT"]
+                                    for wheel in ("FL", "FR", "RL", "RR"))
+
+    ret.steeringAngleDeg = cp.vl["STEER_ANGLE_SENSOR"]["STEER_ANGLE"] + cp.vl["STEER_ANGLE_SENSOR"]["STEER_FRACTION"]
+    ret.steeringRateDeg = cp.vl["STEER_ANGLE_SENSOR"]["STEER_RATE"]
+    ret.carNotReady = cp.vl["READY_STATUS"]["READY_STATUS"] == 0
+    ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(int(cp.vl[self.gear_message]["GEAR"]), None))
+    ret.leftBlinker = cp.vl["BLINKERS_STATE"]["TURN_SIGNALS"] == 1
+    ret.rightBlinker = cp.vl["BLINKERS_STATE"]["TURN_SIGNALS"] == 2
+    ret.doorOpen = any(cp.vl["BODY_CONTROL_STATE"][door] for door in
+                       ("DOOR_OPEN_FL", "DOOR_OPEN_FR", "DOOR_OPEN_RL", "DOOR_OPEN_RR"))
+    ret.seatbeltUnlatched = cp.vl["SEATBELT_STATUS"]["SEATBELT_DRIVER_UNLATCHED"] != 0
+    ret.parkingBrake = cp.vl["BODY_CONTROL_STATE"]["PARKING_BRAKE"] == 1
+    ret.brakeHoldActive = cp.vl["ESP_CONTROL"]["BRAKE_HOLD_ACTIVE"] == 1
+    ret.espDisabled = cp.vl["ESP_CONTROL"]["TC_DISABLED"] != 0
+    ret.genericToggle = bool(cp.vl["LIGHT_STALK"]["AUTO_HIGH_BEAM"])
+
+    driver_torque_invalid = cp.vl["EPS_STATUS"]["DRIVER_TORQUE_INVALID"] != 0
+    ret.vehicleSensorsInvalid = ret.vehicleSensorsInvalid or driver_torque_invalid
+    ret.steeringTorque = (cp.vl["EPS_STATUS"]["STEERING_WHEEL_TORQUE_COARSE"] +
+                          cp.vl["EPS_STATUS"]["STEERING_WHEEL_TORQUE_FINE"]) if not driver_torque_invalid else 0.0
+    ret.steeringPressed = abs(ret.steeringTorque) >= TSS3_STEER_DRIVER_TORQUE_THRESHOLD
+    ret.steerFaultTemporary = bool(cp.vl["EPS_STATUS"]["EPS_FAULT_INHIBIT"])
+
+    self.tss3_request_loss_frames = self.tss3_request_loss_frames + 1 if cp.vl["CONTROL_RESULT"]["REQUEST_LOSS"] else 0
+    self.tss3_acc_faulted |= self.tss3_request_loss_frames * DT_CTRL >= 1.0
+    ret.accFaulted = self.tss3_acc_faulted
+
+    button_events = []
+    switch = cp.vl["CRUISE_BUTTONS"]
+    previous_button = self.tss3_cruise_button
+    if switch["CANCEL_BUTTON"] and not switch["CANCEL_BUTTON_MIRROR_N"]:
+      self.tss3_cruise_button = 1
+    elif switch["SET_BUTTON"] and not switch["SET_BUTTON_MIRROR_N"]:
+      self.tss3_cruise_button = 2
+    elif switch["RES_BUTTON"] and not switch["RES_BUTTON_MIRROR_N"]:
+      self.tss3_cruise_button = 3
+    elif switch["MAIN_BUTTON"]:
+      self.tss3_cruise_button = 4
+    else:
+      self.tss3_cruise_button = 0
+    button_events = create_button_events(self.tss3_cruise_button, previous_button, {
+      1: ButtonType.cancel, 2: ButtonType.decelCruise, 3: ButtonType.accelCruise, 4: ButtonType.mainCruise,
+    })
+
+    prev_distance = self.pcm_follow_distance
+    self.pcm_follow_distance = cp_cam.vl["CRUISE_DISPLAY"]["SET_VEHICLE_INTERVAL_TIME"]
+    if 1 <= prev_distance <= 4 and 1 <= self.pcm_follow_distance <= 4 and prev_distance != self.pcm_follow_distance:
+      button_events.extend(create_button_events(1, 0, {1: ButtonType.gapAdjustCruise}) +
+                           create_button_events(0, 1, {1: ButtonType.gapAdjustCruise}))
+
+    hud_mode = self.tss3_lkas_hud.get("LTA_MODE", 0)
+    lta_switch_state = hud_mode in (0x12, 0x14) if hud_mode in (0x10, 0x12, 0x14) else None
+    if (self.tss3_lta_switch_state is not None and lta_switch_state is not None and
+        lta_switch_state != self.tss3_lta_switch_state):
+      button_events.extend(create_button_events(1, 0, {1: ButtonType.lkas}) +
+                           create_button_events(0, 1, {1: ButtonType.lkas}))
+    if lta_switch_state is not None:
+      self.tss3_lta_switch_state = lta_switch_state
+    ret.buttonEvents = button_events
+
+    request = cp_cam.vl["CONTROL_REQUEST"]
+    ret.cruiseState.enabled = bool(request["CRUISE_OPERATING_LATCH"])
+    ret.cruiseState.standstill = (not self.CP.openpilotLongitudinalControl and ret.cruiseState.enabled and
+                                  bool(request["DELAYED_HOLD_STATE"]))
+    ret.cruiseState.available = bool(cp_cam.vl["CRUISE_DISPLAY"]["CRUISE_MAIN_STATE"])
+    ret.cruiseState.nonAdaptive = cp_cam.vl["CRUISE_STATUS"]["CRUISE_MODE"] == 2
+    ret.cruiseState.speed = request["SET_SPEED"] * CV.KPH_TO_MS
+    cluster_set_speed = cp_cam.vl["CRUISE_DISPLAY"]["UI_SET_SPEED"]
+    if ret.cruiseState.speed != 0 and cluster_set_speed > 0:
+      is_metric = cp.vl["BODY_CONTROL_STATE_2"]["UNITS"] in (1, 2)
+      ret.cruiseState.speedCluster = cluster_set_speed * (CV.KPH_TO_MS if is_metric else CV.MPH_TO_MS)
+
+    self.tss3_stock_pcs = bool(request["PCS_BRAKE_REQUEST"])
+    ret.stockAeb = self.tss3_stock_pcs and request["LONGITUDINAL_REQUEST_ACCEL_LOWER"] < 0
+    ret.stockFcw = bool(cp_cam.vl["PCS_HUD"]["FCW"])
+    return ret, fp_ret
+
   def update(self, can_parsers, starpilot_toggles) -> structs.CarState:
+    if self.CP.flags & ToyotaFlags.TSS3:
+      return self.update_tss3(can_parsers)
+
     cp = can_parsers[Bus.pt]
     cp_cam = can_parsers[Bus.cam]
 
@@ -302,6 +425,27 @@ class CarState(CarStateBase):
 
   @staticmethod
   def get_can_parsers(CP):
+    if CP.flags & ToyotaFlags.TSS3:
+      pt_bus = TSS3_SOURCE_BUS if CP.carFingerprint == CAR.TOYOTA_COROLLA_TSS3 else TSS3_CHASSIS_BUS
+      pt_messages = [
+        ("STEER_ANGLE_SENSOR", 100), ("EPS_STATUS", 100), ("WHEEL_SPEEDS", 100),
+        ("BRAKE_MODULE", 50), ("GAS_PEDAL", 40), ("GEAR_PACKET_HYBRID", 50),
+        ("CONTROL_RESULT", 33), ("READY_STATUS", 1), ("ESP_CONTROL", 3),
+        ("BLINKERS_STATE", 1), ("BODY_CONTROL_STATE", 3), ("SEATBELT_STATUS", 3),
+        ("BODY_CONTROL_STATE_2", 3), ("LIGHT_STALK", 1), ("CRUISE_BUTTONS", 30),
+        ("SIGNER_RESPONSE", float('nan')),
+      ]
+      cam_messages = [
+        ("CONTROL_REQUEST", 40), ("CRUISE_DISPLAY", 1), ("CRUISE_STATUS", 1),
+        ("LKAS_HUD", 1), ("PCS_HUD", 5),
+      ]
+      return {
+        Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, pt_bus),
+        Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], cam_messages, TSS3_SOURCE_BUS),
+        Bus.loopback: CANParser(DBC[CP.carFingerprint][Bus.pt], [("CONTROL_REQUEST", float('nan'))], pt_bus + 192),
+        Bus.adas: CANParser(DBC[CP.carFingerprint][Bus.pt], [("SIGNER_REQUEST", float('nan'))], pt_bus + 192),
+      }
+
     pt_messages = [
       ("BLINKERS_STATE", float('nan')),
     ]

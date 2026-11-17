@@ -34,6 +34,24 @@
 
 #define SAFETY_UNUSED(x) ((void)(x))
 
+// Compare address and bus as one key: CANPacket_t has a 29-bit address and 3-bit bus.
+// Newer safety modes use this helper to avoid partially matching a CAN packet.
+static bool msg_matches_addr_bus(const CANPacket_t *msg, uint32_t addr, uint32_t bus) {
+  uint32_t actual = ((uint32_t)msg->addr << 3) | (uint32_t)msg->bus;
+  uint32_t expected = (addr << 3) | bus;
+  return actual == expected;
+}
+
+static bool msg_matches_addr_bus_len(const CANPacket_t *msg, uint32_t addr, uint32_t bus, uint32_t len) {
+  uint64_t actual = ((uint64_t)msg->addr << 10) | ((uint64_t)msg->bus << 7) |
+                    (uint64_t)dlc_to_len[msg->data_len_code];
+  uint64_t expected = ((uint64_t)addr << 10) | ((uint64_t)bus << 7) | (uint64_t)len;
+  return actual == expected;
+}
+
+#define MSG_MATCHES_SELECT(_msg, _addr, _bus, _len, NAME, ...) NAME
+#define msg_matches(...) MSG_MATCHES_SELECT(__VA_ARGS__, msg_matches_addr_bus_len, msg_matches_addr_bus)(__VA_ARGS__)
+
 // compute the time elapsed (in microseconds) from 2 counter samples
 // case where ts < ts_last is ok: overflow is properly re-casted into uint32_t
 static inline uint32_t safety_get_ts_elapsed(uint32_t ts, uint32_t ts_last) {
