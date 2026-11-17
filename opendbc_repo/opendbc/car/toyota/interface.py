@@ -6,6 +6,7 @@ from opendbc.car.toyota.values import Ecu, CAR, DBC, ToyotaFlags, CarControllerP
                                                   MIN_ACC_SPEED, EPS_SCALE, NO_STOP_TIMER_CAR, ANGLE_CONTROL_CAR, \
                                                   ToyotaSafetyFlags, LEGACY_PRIUS_CAR, TOYOTA_AUTO_HOLD_CARS, \
                                                   uses_toyota_auto_hold_aeb, ARS510_RADAR_CAR
+from opendbc.car.toyota.tss3 import TSS3_CHASSIS_BUS
 from opendbc.car.disable_ecu import disable_ecu
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
@@ -52,9 +53,17 @@ class CarInterface(CarInterfaceBase):
       ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.SECOC.value
       ret.dashcamOnly = is_release
 
-    if candidate in ANGLE_CONTROL_CAR:
+    if ret.flags & ToyotaFlags.TSS3:
+      ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.TSS3.value
+      if candidate == CAR.TOYOTA_COROLLA_TSS3:
+        ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.TSS3_RX_BUS_2.value
+      ret.dashcamOnly = is_release
+      ret.steerAtStandstill = True
+
+    if candidate in ANGLE_CONTROL_CAR or ret.flags & ToyotaFlags.TSS3:
       ret.steerControlType = SteerControlType.angle
-      ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.LTA.value
+      if candidate in ANGLE_CONTROL_CAR:
+        ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.LTA.value
 
       # LTA control can be more delayed and winds up more often
       ret.steerActuatorDelay = 0.18
@@ -65,7 +74,7 @@ class CarInterface(CarInterfaceBase):
       ret.steerActuatorDelay = 0.12  # Default delay, Prius has larger delay
       ret.steerLimitTimer = 0.4
 
-    stop_and_go = candidate in TSS2_CAR
+    stop_and_go = candidate in TSS2_CAR or bool(ret.flags & ToyotaFlags.TSS3)
 
     # Detect smartDSU, which intercepts ACC_CMD from the DSU (or radar) allowing
     # openpilot to send it. 0x2AA is sent by a similar device which intercepts
@@ -92,7 +101,8 @@ class CarInterface(CarInterfaceBase):
     # In TSS2 cars, the camera does long control
     found_ecus = [fw.ecu for fw in car_fw]
 
-    if Ecu.hybrid in found_ecus:
+    if Ecu.hybrid in found_ecus or (candidate == CAR.TOYOTA_COROLLA_TSS3 and
+                                   (Ecu.electricBrakeBooster in found_ecus or 0x127 in fingerprint.get(TSS3_CHASSIS_BUS, {}))):
       ret.flags |= ToyotaFlags.HYBRID.value
 
     if candidate in LEGACY_PRIUS_CAR:
@@ -158,6 +168,9 @@ class CarInterface(CarInterfaceBase):
       else:
         use_sdsu = use_sdsu and alpha_long
 
+    if ret.flags & ToyotaFlags.TSS3:
+      ret.alphaLongitudinalAvailable = True
+
     # openpilot longitudinal enabled by default:
     #  - non-(TSS2 radar ACC cars) w/ smartDSU or radar filter installed
     #  - TSS2 cars with camera sending ACC_CONTROL where we can block it
@@ -168,9 +181,10 @@ class CarInterface(CarInterfaceBase):
     ret.openpilotLongitudinalControl = (use_sdsu or
                                         bool(ret.flags & ToyotaFlags.DSU_BYPASS.value) or
                                         candidate in (TSS2_CAR - RADAR_ACC_CAR) or
-                                        bool(ret.flags & ToyotaFlags.DISABLE_RADAR.value))
+                                        bool(ret.flags & ToyotaFlags.DISABLE_RADAR.value) or
+                                        (bool(ret.flags & ToyotaFlags.TSS3) and alpha_long))
 
-    ret.autoResumeSng = ret.openpilotLongitudinalControl and candidate in NO_STOP_TIMER_CAR
+    ret.autoResumeSng = ret.openpilotLongitudinalControl and (candidate in NO_STOP_TIMER_CAR or bool(ret.flags & ToyotaFlags.TSS3))
     ret.enableGasInterceptorDEPRECATED = 0x201 in fingerprint[0] and ret.openpilotLongitudinalControl
     if ret.enableGasInterceptorDEPRECATED:
       ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.GAS_INTERCEPTOR.value
@@ -194,7 +208,7 @@ class CarInterface(CarInterfaceBase):
     camry_hybrid_long_defaults = (candidate == CAR.TOYOTA_CAMRY and ret.openpilotLongitudinalControl and
                                   bool(ret.flags & ToyotaFlags.HYBRID.value))
 
-    if candidate in TSS2_CAR or ret.enableGasInterceptorDEPRECATED or prius_long_defaults:
+    if candidate in TSS2_CAR or ret.flags & ToyotaFlags.TSS3 or ret.enableGasInterceptorDEPRECATED or prius_long_defaults:
       ret.flags |= ToyotaFlags.RAISED_ACCEL_LIMIT.value
 
       ret.vEgoStopping = 0.25
