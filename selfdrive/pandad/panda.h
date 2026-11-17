@@ -26,7 +26,7 @@
 #define PANDA_BUS_OFFSET 4
 
 struct __attribute__((packed)) can_header {
-  uint8_t fd : 1;
+  uint8_t reserved : 1;
   uint8_t bus : 3;
   uint8_t data_len_code : 4;
   uint8_t rejected : 1;

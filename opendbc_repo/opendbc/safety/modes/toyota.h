@@ -91,11 +91,6 @@
   {.msg = {{0x201, 0, 6, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
 
 static bool toyota_secoc = false;
-static bool toyota_tss3_signer = false;
-static bool toyota_tss3_08a_host = false;
-static bool toyota_tss3_corolla_signer = false;
-static bool toyota_tss3_08a_replacement_active = false;
-static uint32_t toyota_tss3_08a_last_publication_ts = 0U;
 static bool toyota_alt_brake = false;
 static bool toyota_stock_longitudinal = false;
 static bool toyota_lta = false;
@@ -133,41 +128,13 @@ static bool toyota_get_quality_flag_valid(const CANPacket_t *msg) {
 }
 
 static void toyota_rx_all_hook(const CANPacket_t *msg) {
-  if (!toyota_tss3_signer && toyota_alt_cruise &&
-      (msg->bus == 0U) && (msg->addr == 0x365U) && (GET_LEN(msg) == 7U)) {
+  if (toyota_alt_cruise && (msg->bus == 0U) && (msg->addr == 0x365U) && (GET_LEN(msg) == 7U)) {
     acc_main_on = GET_BIT(msg, 0U);  // DSU_CRUISE.MAIN_ON
   }
 }
 
 static void toyota_rx_hook(const CANPacket_t *msg) {
-  if (toyota_tss3_signer) {
-    if ((msg->bus == 2U) && (msg->addr == 0x8AU) && (GET_LEN(msg) == 32U)) {
-      // Native FRC 0x08A remains only the engagement and presence input.
-      pcm_cruise_check(GET_BIT(msg, 27U));
-    }
-    if ((msg->bus == 2U) && (msg->addr == 0x25U)) {
-      int angle_coarse = ((msg->data[0] & 0xFU) << 8U) | msg->data[1];
-      angle_coarse = to_signed(angle_coarse, 12);
-      const int angle_fraction = to_signed((msg->data[4] >> 4U) & 0xFU, 4);
-      const int angle_tenths = (angle_coarse * 15) + angle_fraction;
-      update_sample(&angle_meas, ROUND(((float)angle_tenths * 1787.0F) / 1024.0F));
-    }
-    if ((msg->bus == 2U) && (msg->addr == 0x116U)) {
-      gas_pressed = msg->data[1] != 0U;
-    }
-    if ((msg->bus == 2U) && (msg->addr == 0x101U)) {
-      brake_pressed = GET_BIT(msg, 3U);
-    }
-    if ((msg->bus == 2U) && (msg->addr == 0xAAU)) {
-      int speed = 0;
-      for (uint8_t i = 0U; i < 8U; i += 2U) {
-        const int wheel_speed = ((msg->data[i] & 0x7FU) << 8U) | msg->data[i + 1U];
-        speed += wheel_speed - 6767;
-      }
-      vehicle_moving = speed != 0;
-      UPDATE_VEHICLE_SPEED(speed / 4.0 * 0.01 * KPH_TO_MS);
-    }
-  } else if (msg->bus == 0U) {
+  if (msg->bus == 0U) {
 
     // get eps motor torque (0.66 factor in dbc)
     if (msg->addr == 0x260U) {
@@ -255,7 +222,6 @@ static void toyota_rx_hook(const CANPacket_t *msg) {
       gas_interceptor_prev = gas_interceptor;
     }
   }
-
 }
 
 static bool toyota_tx_hook(const CANPacket_t *msg) {
@@ -298,102 +264,8 @@ static bool toyota_tx_hook(const CANPacket_t *msg) {
     .max_accel = 2000,   // 2.0 m/s2
     .min_accel = -3500,  // -3.5 m/s2
   };
+
   bool tx = true;
-
-  if (toyota_tss3_signer) {
-    // US-sedan Corolla E210 geometry and a conservative kinematic (zero-slip) model.
-    // 960 raw is 55 degrees at the proven 1024/17870 request scale.
-    static const AngleSteeringLimits TOYOTA_COROLLA_08A_ANGLE_LIMITS = {
-      .max_angle = 960,
-      .angle_deg_to_can = 17.451171875F,
-      .frequency = 100U,
-    };
-#ifdef CANFD
-    static const AngleSteeringParams TOYOTA_COROLLA_ANGLE_PARAMS = {
-      .slip_factor = 0.0F,
-      .steer_ratio = 13.9F,
-      .wheelbase = 2.70F,
-    };
-#endif
-
-    const bool signer_admin = !msg->fd && (GET_LEN(msg) == 8U) &&
-                              (msg->bus == 0U) && (msg->addr == 0x777U) &&
-                              (msg->data[0] == 7U);
-    const bool oracle_transport = toyota_tss3_08a_host && toyota_tss3_corolla_signer &&
-                                  !msg->fd && (GET_LEN(msg) == 8U) &&
-                                  (msg->bus == 0U) && (msg->addr == 0x777U) &&
-                                  ((msg->data[0] & 0xC0U) == 0x80U);
-#ifdef CANFD
-    const bool host_08a = toyota_tss3_08a_host &&
-                          (msg->bus == 0U) && (msg->addr == 0x8AU);
-#endif
-    tx = oracle_transport;
-
-    if (signer_admin) {
-      const bool valid = toyota_tss3_08a_host &&
-                         (msg->data[0] == 7U) && (msg->data[1] == 0xC9U) &&
-                         (msg->data[2] == 0xA8U) && (msg->data[3] <= 1U) &&
-                         (msg->data[4] == 0U) && (msg->data[5] == 0U) &&
-                         (msg->data[6] == 0U) && (msg->data[7] == 0U);
-      tx = valid;
-      if (valid && (msg->data[3] == 0U)) {
-        toyota_tss3_08a_replacement_active = false;
-      } else if (valid) {
-        toyota_tss3_08a_replacement_active = true;
-        toyota_tss3_08a_last_publication_ts = microsecond_timer_get();
-        desired_angle_last = SAFETY_CLAMP(angle_meas.values[0],
-                                          -TOYOTA_COROLLA_08A_ANGLE_LIMITS.max_angle,
-                                           TOYOTA_COROLLA_08A_ANGLE_LIMITS.max_angle);
-      }
-    }
-
-    // CAN-FD host applications only exist on H7 pandas. Keeping this block
-    // out of F4 builds also prevents any 32-byte payload access on the F4's
-    // physically 8-byte CANPacket_t storage.
-#ifdef CANFD
-    if (host_08a) {
-      tx = false;
-      bool application_shape = toyota_tss3_08a_replacement_active &&
-                               msg->fd && (GET_LEN(msg) == 32U);
-      bool actuation_valid = true;
-
-      if (application_shape) {
-        application_shape &= (msg->data[0] == 0U) && (msg->data[1] == 0U) &&
-                             (msg->data[2] == 0U) && (msg->data[3] == 0x08U) &&
-                             (msg->data[4] == 0x80U) && (msg->data[5] == 0U) &&
-                             (msg->data[6] == 0x2DU) && (msg->data[7] == 0x47U) &&
-                             (msg->data[8] == 0U) && (msg->data[9] == 0U) &&
-                             (msg->data[11] == 0U) && (msg->data[12] == 0U) &&
-                             (msg->data[13] == 0x7FU) && (msg->data[14] == 0xFFU) &&
-                             (msg->data[15] == 0U) && (msg->data[16] == 0x7FU) &&
-                             (msg->data[17] == 0xFFU) && (msg->data[20] == 0xC0U) &&
-                             (msg->data[22] == 0x10U) && (msg->data[23] == 0U) &&
-                             (msg->data[25] == 0U) && (msg->data[27] == 0U);
-
-        const uint8_t host_id = msg->data[21];
-        const bool lateral_active = (host_id == 11U) && (msg->data[24] == 100U);
-        const bool lateral_inactive = (host_id == 0U) && (msg->data[24] == 50U);
-        application_shape &= lateral_active || lateral_inactive;
-
-        int target_angle = (msg->data[18] << 8U) | msg->data[19];
-        target_angle = to_signed(target_angle, 16);
-        actuation_valid &= !steer_angle_cmd_checks_vm(target_angle, lateral_active,
-                                                       TOYOTA_COROLLA_08A_ANGLE_LIMITS,
-                                                       TOYOTA_COROLLA_ANGLE_PARAMS);
-        actuation_valid &= !safety_max_limit_check(target_angle,
-                                                   TOYOTA_COROLLA_08A_ANGLE_LIMITS.max_angle,
-                                                  -TOYOTA_COROLLA_08A_ANGLE_LIMITS.max_angle);
-      }
-
-      if (application_shape) {
-        toyota_tss3_08a_last_publication_ts = microsecond_timer_get();
-        tx = actuation_valid;
-      }
-    }
-#endif
-
-    return tx;
-  }
 
   // Check if msg is sent on BUS 0
   if (msg->bus == 0U) {
@@ -588,6 +460,7 @@ static safety_config toyota_init(uint16_t param) {
   static const CanMsg TOYOTA_SECOC_LONG_TX_MSGS[] = {
     TOYOTA_COMMON_SECOC_LONG_TX_MSGS
   };
+
   // safety param flags
   // first byte is for EPS factor, second is for flags
   const uint32_t TOYOTA_PARAM_OFFSET = 8U;
@@ -596,24 +469,12 @@ static safety_config toyota_init(uint16_t param) {
   const uint32_t TOYOTA_PARAM_STOCK_LONGITUDINAL = 2UL << TOYOTA_PARAM_OFFSET;
   const uint32_t TOYOTA_PARAM_LTA = 4UL << TOYOTA_PARAM_OFFSET;
   const uint32_t TOYOTA_PARAM_LONG_FILTER = 16UL << TOYOTA_PARAM_OFFSET;
-  const uint32_t TOYOTA_PARAM_TSS3_SIGNER = 16UL << TOYOTA_PARAM_OFFSET;
   const uint32_t TOYOTA_PARAM_GAS_INTERCEPTOR = 32UL << TOYOTA_PARAM_OFFSET;
   const uint32_t TOYOTA_PARAM_ALT_CRUISE = 64UL << TOYOTA_PARAM_OFFSET;
-  const uint32_t TOYOTA_PARAM_TSS3_08A_HOST = 64UL << TOYOTA_PARAM_OFFSET;
-  const uint32_t TOYOTA_PARAM_TSS3_COROLLA_SIGNER = 128UL << TOYOTA_PARAM_OFFSET;
 
 #ifdef ALLOW_DEBUG
   const uint32_t TOYOTA_PARAM_SECOC = 8UL << TOYOTA_PARAM_OFFSET;
   toyota_secoc = GET_FLAG(param, TOYOTA_PARAM_SECOC);
-  toyota_tss3_corolla_signer = GET_FLAG(param, TOYOTA_PARAM_TSS3_COROLLA_SIGNER);
-  // StarPilot already uses bits 4 and 6 for long-filter and alternate-cruise.
-  // They become signer sub-flags only when the unique Corolla bit 7 is set.
-  toyota_tss3_signer = toyota_tss3_corolla_signer && GET_FLAG(param, TOYOTA_PARAM_TSS3_SIGNER);
-  toyota_tss3_08a_host = toyota_tss3_corolla_signer && GET_FLAG(param, TOYOTA_PARAM_TSS3_08A_HOST);
-#else
-  toyota_tss3_signer = false;
-  toyota_tss3_08a_host = false;
-  toyota_tss3_corolla_signer = false;
 #endif
 
   toyota_alt_brake = GET_FLAG(param, TOYOTA_PARAM_ALT_BRAKE);
@@ -622,7 +483,6 @@ static safety_config toyota_init(uint16_t param) {
   toyota_long_filter = GET_FLAG(param, TOYOTA_PARAM_LONG_FILTER);
   enable_gas_interceptor = GET_FLAG(param, TOYOTA_PARAM_GAS_INTERCEPTOR);
   toyota_alt_cruise = GET_FLAG(param, TOYOTA_PARAM_ALT_CRUISE);
-  toyota_tss3_08a_replacement_active = false;
   toyota_dbc_eps_torque_factor = param & TOYOTA_EPS_FACTOR;
 
   if (toyota_stock_longitudinal || toyota_secoc) {
@@ -630,13 +490,7 @@ static safety_config toyota_init(uint16_t param) {
   }
 
   safety_config ret;
-  if (toyota_tss3_signer) {
-    static const CanMsg toyota_corolla_tss3_tx_msgs[] = {
-      {0x777, 0, 8, .check_relay = false},
-      {0x08A, 0, 32, .check_relay = true, .disable_static_blocking = true},
-    };
-    SET_TX_MSGS(toyota_corolla_tss3_tx_msgs, ret);
-  } else if (toyota_secoc) {
+  if (toyota_secoc) {
     if (toyota_stock_longitudinal) {
       SET_TX_MSGS(TOYOTA_SECOC_TX_MSGS, ret);
     } else {
@@ -660,16 +514,7 @@ static safety_config toyota_init(uint16_t param) {
     }
   }
 
-  if (toyota_tss3_signer) {
-    static RxCheck toyota_corolla_tss3_rx_checks[] = {
-      {.msg = {{0x025, 2, 32, 100U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
-      {.msg = {{0x0AA, 2, 8, 100U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
-      {.msg = {{0x116, 2, 8, 40U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
-      {.msg = {{0x101, 2, 8, 50U, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
-      {.msg = {{0x08A, 2, 32, 40U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
-    };
-    SET_RX_CHECKS(toyota_corolla_tss3_rx_checks, ret);
-  } else if (toyota_secoc) {
+  if (toyota_secoc) {
     static RxCheck toyota_secoc_rx_checks[] = {
       TOYOTA_SECOC_RX_CHECKS
     };
@@ -733,18 +578,9 @@ static safety_config toyota_init(uint16_t param) {
 
 static bool toyota_fwd_hook(int bus_num, int addr) {
   bool block_msg = false;
-  if (toyota_tss3_08a_host && toyota_tss3_08a_replacement_active &&
-      (bus_num == 2) && (addr == 0x8A)) {
-    const uint32_t elapsed = safety_get_ts_elapsed(microsecond_timer_get(), toyota_tss3_08a_last_publication_ts);
-    if (elapsed > 100000U) {
-      toyota_tss3_08a_replacement_active = false;
-    } else {
-      block_msg = true;
-    }
-  }
   if (bus_num == 2) {
-    block_msg |= (addr == 0x344) && ((alternative_experience & ALT_EXP_ALLOW_AEB) != 0) &&
-                 !vehicle_moving && !gas_pressed && acc_main_on;
+    block_msg = (addr == 0x344) && ((alternative_experience & ALT_EXP_ALLOW_AEB) != 0) &&
+                !vehicle_moving && !gas_pressed && acc_main_on;
   }
   return block_msg;
 }

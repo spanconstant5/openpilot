@@ -4,6 +4,7 @@ import os
 import usb1
 import time
 import signal
+import subprocess
 
 from panda import Panda, PandaDFU, PandaProtocolMismatch, FW_PATH
 from openpilot.common.basedir import BASEDIR
@@ -13,7 +14,6 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.pandad.rivian_long_flasher import prepare_rivian_bridge
 from openpilot.selfdrive.pandad.panda_firmware import get_firmware_path, get_tesla_wake_on_can
 from openpilot.selfdrive.pandad.panda_firmware import get_selected_firmware_name as get_selected_firmware_name
-from openpilot.selfdrive.pandad.direct_panda_lease import DirectPandaLeaseRunner
 
 
 def get_expected_firmware_path(panda: Panda, remote_start: bool, hkg_remote_start: bool, ignore_ignition_line: bool,
@@ -93,27 +93,17 @@ def flash_panda(panda_serial: str, remote_start: bool, hkg_remote_start: bool, i
 
 
 def main() -> None:
-  lease_runner = DirectPandaLeaseRunner()
-
-  # Signal pandad to close the relay and exit.
+  # signal pandad to close the relay and exit
   def signal_handler(signum, frame):
     cloudlog.info(f"Caught signal {signum}, exiting")
     nonlocal do_exit
     do_exit = True
+    if process is not None:
+      process.send_signal(signal.SIGINT)
 
-    lease_runner.shutdown()
-
-  def direct_lease_signal_handler(signum, frame):
-    lease = lease_runner.request_lease()
-    if lease is None:
-      cloudlog.warning("Ignoring direct-Panda lease signal without a live lease")
-    else:
-      cloudlog.info(f"Direct-Panda lease requested: {lease}")
-
+  process = None
   do_exit = False
   signal.signal(signal.SIGINT, signal_handler)
-  signal.signal(signal.SIGTERM, signal_handler)
-  signal.signal(signal.SIGWINCH, direct_lease_signal_handler)
 
   count = 0
   first_run = True
@@ -222,7 +212,8 @@ def main() -> None:
     else:
       os.environ.pop("BOARDD_SKIP_FW_CHECK", None)
     os.environ['MANAGER_DAEMON'] = 'pandad'
-    lease_runner.run(["./pandad", *panda_serials], cwd=os.path.join(BASEDIR, "selfdrive/pandad"))
+    process = subprocess.Popen(["./pandad", *panda_serials], cwd=os.path.join(BASEDIR, "selfdrive/pandad"))
+    process.wait()
 
 
 if __name__ == "__main__":

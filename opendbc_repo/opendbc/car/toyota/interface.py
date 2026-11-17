@@ -19,40 +19,6 @@ class CarInterface(CarInterfaceBase):
   CarController = CarController
   RadarInterface = RadarInterface
 
-  def get_startup_can_sends(self, now_nanos: int):
-    transport = self.CC.tss3_request_transport
-    if transport is None:
-      return []
-
-    # Keep the volatile EPS signer alive while selfdrived/controlsd finish
-    # initialization. This is an inactive challenge only: it cannot arm host
-    # ownership, publish 0x08A, or request longitudinal actuation.
-    return transport.update_control(
-      enabled=False,
-      lat_active=False,
-      target_angle_deg=0.0,
-      long_active=False,
-      accel=0.0,
-      set_speed_kph=0.0,
-      now_nanos=now_nanos,
-    )
-
-  def update(self, can_packets, starpilot_toggles):
-    ret, fp_ret = super().update(can_packets, starpilot_toggles)
-    if self.CC.tss3_request_transport is not None:
-      self.CC.observe_tss3_request_plane(can_packets, ret.canValid)
-      transport = self.CC.tss3_request_transport
-      authority_unavailable = transport.authority_unavailable()
-      signer_not_ready = not transport.signer_ready()
-      signer_unavailable = transport.can_valid and signer_not_ready
-      # A successful inactive challenge is required before accepting a PCM
-      # engagement edge. This never arms the request plane or publishes 0x08A.
-      ret.blockPcmEnable = ret.blockPcmEnable or signer_not_ready
-      ret.steerFaultTemporary = ret.steerFaultTemporary or authority_unavailable or signer_unavailable
-      if self.CP.openpilotLongitudinalControl:
-        ret.accFaulted = ret.accFaulted or authority_unavailable
-    return ret, fp_ret
-
   @classmethod
   def get_params(cls, candidate, fingerprint, car_fw, alpha_long, is_release, docs, starpilot_toggles):
     ret = super().get_params(candidate, fingerprint, car_fw, alpha_long, is_release, docs, starpilot_toggles)
@@ -256,24 +222,6 @@ class CarInterface(CarInterfaceBase):
       # Pedal/SDSU Toyotas feel best with a softer final stop clamp.
       ret.longitudinalActuatorDelay = max(ret.longitudinalActuatorDelay, 0.2)
       ret.stopAccel = -1.5
-
-    if candidate == CAR.TOYOTA_COROLLA_TSS3:
-      # The RAM-resident EPS signer authenticates complete host-owned 0x08A
-      # applications. Corolla uses the four-frame 0x777 carrier on bus 0.
-      ret.secOcRequired = False
-      ret.dashcamOnly = False
-      ret.radarUnavailable = True
-      ret.alphaLongitudinalAvailable = True
-      ret.openpilotLongitudinalControl = False
-      ret.autoResumeSng = False
-      ret.minEnableSpeed = MIN_ACC_SPEED
-      ret.steerControlType = SteerControlType.angle
-      ret.lateralTuning.init('pid')
-
-      cfg = get_safety_config(structs.CarParams.SafetyModel.toyota)
-      cfg.safetyParam = (EPS_SCALE[candidate] | ToyotaSafetyFlags.TSS3_SIGNER.value |
-                         ToyotaSafetyFlags.TSS3_08A_HOST.value | ToyotaSafetyFlags.TSS3_COROLLA_SIGNER.value)
-      ret.safetyConfigs = [cfg]
 
     return ret
 

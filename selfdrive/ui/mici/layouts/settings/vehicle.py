@@ -9,9 +9,9 @@ from openpilot.selfdrive.ui.lib.fingerprint_catalog import (
   shorten_model_label,
 )
 from openpilot.selfdrive.ui.layouts.settings.common import restart_needed_callback
-from openpilot.selfdrive.ui.mici.layouts.settings.tss3_signer import CorollaSignerButton
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
+from openpilot.system.ui.lib.multilang import tr
 
 class FingerprintLayoutMici(NavScroller):
   def __init__(self):
@@ -61,8 +61,8 @@ class FingerprintLayoutMici(NavScroller):
 
   def _update_enabled(self, force_fp):
     self._force_fingerprint_toggle.set_enabled(ui_state.is_offroad())
-    self._car_make_btn.set_enabled(ui_state.is_offroad() and force_fp)
-    self._car_model_btn.set_enabled(ui_state.is_offroad() and force_fp)
+    self._car_make_btn.set_enabled((ui_state.is_offroad() and force_fp))
+    self._car_model_btn.set_enabled((ui_state.is_offroad() and force_fp))
 
   def _update_toggles(self):
     ui_state.update_params()
@@ -195,7 +195,7 @@ class VehicleLayoutMici(NavScroller):
     fingerprint_btn = BigButton("fingerprint", "",gui_app.texture("icons_mici/settings/vehicle/fingerprint.png", 58, 64))
     fingerprint_btn.set_click_callback(lambda: gui_app.push_widget(fingerprint_panel))
 
-    vehicle_specific_widgets = (CorollaSignerButton(),)
+    vehicle_specific_widgets = tuple()
 
     self._scroller.add_widgets([
       fingerprint_btn,

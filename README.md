@@ -1,187 +1,102 @@
-# 2025 Corolla Hybrid — StarPilot TSS 3.0 port
+# StarPilot
 
-[![Corolla TSS3 checks](https://github.com/spanconstant5/2025corolla-starpilot/actions/workflows/corolla-tss3-ci.yml/badge.svg)](https://github.com/spanconstant5/2025corolla-starpilot/actions/workflows/corolla-tss3-ci.yml)
+[![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-blue?logo=readthedocs&logoColor=white)](https://deepwiki.com/StarPilotHQ/StarPilot)
+[![Discord](https://img.shields.io/discord/1387432184121393333?label=Discord)](https://firestar.link/discord)
+[![Last Updated](https://img.shields.io/github/last-commit/StarPilotHQ/StarPilot/StarPilot)](https://github.com/StarPilotHQ/StarPilot)
+[![Wiki](https://img.shields.io/badge/Wiki-StarPilot-blue?logo=wiki)](https://wiki.firestar.link)
 
-This repository is a StarPilot-based openpilot build for one target: the
-Span/`spanconstant5` 2025 Toyota Corolla Hybrid with Toyota Safety Sense 3.0.
-It carries the supplied Corolla control work into StarPilot while preserving
-the narrow Panda transmit allowlist and the evidence boundaries around the
-vehicle.
+**StarPilot** is a custom fork of [comma.ai's openpilot](https://comma.ai/openpilot),
+an open source driver assistance system.
 
-The RAM-resident signer transport is verified live on the target EPS. The old
-payload repeatedly stopped answering within about eight seconds and is revoked;
-a successor built from Kai's current self-resolving implementation is pinned as
-a stationary-only candidate. It must pass the full stationary gate before this
-integration can be road-qualified. Longitudinal control remains deliberately
-disabled.
+Openpilot provides
+* Automated Lane Centering
+* Adaptive Cruise Control
+* Lane Change Assist
+* Driver Monitoring *without wheel nags*
 
-## Current status
+Ford-specific lateral-control and vehicle-support work includes substantial adaptations from
+[BluePilot](https://github.com/BluePilotDev/bluepilot/tree/bp-7.0), principally developed by
+[Alan Polk](https://github.com/alan-polk) with additional BluePilot contributors. StarPilot's
+implementation has since diverged, but that does not erase its lineage. See [CREDITS.md](CREDITS.md)
+for the code-level provenance and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for applicable
+upstream notices and terms. BluePilot and its contributors do not maintain or endorse StarPilot;
+please direct support requests for this adaptation to the StarPilot project.
 
-| Area | Status | Basis |
-|---|---|---|
-| 2025 EPS identity | Verified | F181 `8965F1208000` + `8A3111213000`, serial `8965012N50E12H030731`, MCU `R7F701383` |
-| EPS application transfer | Verified offline | The analyzed 2025 and 2023 high application regions are byte-identical from `0x17E00` upward |
-| RAM-resident signer | Successor build pending vehicle validation | Old payload `72ffc3ee…` stopped after 7.846 and 8.091 s and remains revoked. Candidate `6234bb5b…`, independently rebuilt from clean RH850 source commit `9a7c8a7e…`, is the only accepted kit and still needs the stationary >8 s gate. |
-| Signer transport | Verified live | Four classic `0x777` frames and `0x7A9` response on Panda bus 0 |
-| 100 Hz benchmark | Qualified with loss handling | 100 sent, 95 responses, 94.343 Hz effective, 25.366 ms maximum latency, max 7 outstanding; five isolated responses were dropped during high Panda RX-buffer overflow |
-| Lateral command | Integrated, offline-tested | Signed host `0x08A`, Corolla 55-degree cap, 100 Hz scheduler and 90 ms signer watchdog |
-| Longitudinal command | Disabled | Host application is constrained to zero acceleration pending separate Corolla validation |
-| Panda safety | Debug-gated and tested | Exact Corolla signer carrier, admin, and signed-`0x08A` envelopes only |
-| Automatic vehicle identification | Provisional firmware map added | Kai's `tss3-expand` Corolla map now includes the exact `8965F1208000 / 8A3111213000` EPS. Its engine, ABS, and radar versions still need confirmation from this car, so manual selection remains the authority. |
-| Vehicle-specific tuning | Unresolved | Exact 2025 mass, steering ratio calibration, and driver-override threshold are not proved |
+Hyundai, Kia, and Genesis angle steering and related vehicle support include substantial adaptations
+from [sunnypilot](https://github.com/sunnypilot/sunnypilot/tree/hkg-angle-steering-2025) and its
+[opendbc angle-steering branch](https://github.com/sunnypilot/opendbc/tree/hkg-angle-steering-2025).
+StarPilot's implementation has diverged significantly; the upstream contributors do not maintain
+this adaptation. Detailed code lineage is recorded in [CREDITS.md](CREDITS.md#hyundai-kia-and-genesis-support-adapted-from-sunnypilot).
 
-## Use the manual vehicle selection
+StarPilot has a vibrant, welcoming community [discord](https://firestar.link/discord).
+Stop by to chat or ask questions!
+If your car isn't driving as well as you'd like, [open a ticket so we can help](https://firestar.link/logs)!
 
-Until a complete, unique fingerprint is available, select:
+## Documentation
 
-```text
-Toyota Corolla Hybrid 2025 (TSS 3.0)
-```
+Please see [https://wiki.firestar.link](https://wiki.firestar.link) for hardware lists,
+installation guides, and software configuration.
 
-in StarPilot's vehicle settings and enable **Disable Fingerprinting**. This uses
-StarPilot's existing `CarModel` override. The port does not add a partial
-fingerprint that could silently identify another Toyota as this car.
+## Features
 
-## Reinstall the volatile signer on the comma
+* **Full support for Comma C3, C3X, and C4**
+* Full support for chestnut/eGPU on C3, C3X, and C4. C3/C3X may require special gps handling.
+* Model switcher with all of comma's tinygrad driving models
+* StarPilot custom torque controller
+* StarPilot custom longitudinal planner for both radar and VoACC (visual only, radar-less) vehicles
+* **Custom tuning for an expanding list of vehicles**
+* Firestar Lateral Method -
+Auto tuning system to adapt openpilot to *your* car's unique lateral characteristics.
+* Galaxy: StarPilot's portal to configure your comma device using your phone from anywhere.
+Download models, change settings, update software, diagnostics, manage dashcam video, and more.
+* Navigation - Display routes and give the driving model hints on taking exits and turns.
+* Always On Lateral (full time steering assist)
+* Lane Centering - Enable to center between detected lane lines,
+with graceful fallback to model E2E lateral outputs and safety breakout
+* Force Stop 2.0 - Better stops at stop signs and traffic lights.
+* Speed Limit Controller - Use dashboard, map data, and/or vision detection for speed limit signs
+* Curve Speed Controller - Learns from how you take curves
+* Conditional Experimental Mode (CEM)
+* Conditional Chill Mode (CCM)
+* Driving Profiles and Traffic Mode
+* Custom themes
+* Alert volume customization
+* Comma Pedal Interceptor support
+* Bluetooth support - Connect keyboards, controllers, steering wheel remotes, and more.
+* Sentry mode - Record when motion is detected while parked.
+* V-ASM - Detect vehicles in the adjacent/blind spots using the driver-facing camera.
+* Additional car support - Toyota SDSU, ZSS, CAN filter; pre-AP tesla; ford; Polestar 2; and more.
+* And more!
 
-The exact pinned request-signer kit must remain at `/data/tss3-oracle`. After a
-full vehicle power cycle, turn the vehicle on, leave it in Park with the wheels
-straight, and open:
 
-```text
-C3/C3X: StarPilot > Vehicle Settings > Corolla RAM Signer > INSTALL
-C4:     Settings > Vehicle > Corolla RAM Signer > slide to install
-```
+## GM-only Features
 
-The action is shown only for the manually selected Corolla TSS3 platform and
-is enabled only while the car is on, stationary, in Park, and disengaged. It
-verifies the exact Corolla target, host-runtime hash, authenticated-payload
-hash, bus-0 request/response profile, and the installer's live-probe verdict.
-It then cycles openpilot controls so Panda leaves diagnostic mode and reapplies
-the Corolla safety configuration. The full JSON and terminal log are retained
-under `/data/tss3-oracle-runs/ui-*`.
+* Increased LKAS fault resiliency
+* ASCM_INT and SASCM support
+* Custom lateral torque controller, with special tuning for Bolts
+* 50% extra torque on 2017 Chevy Bolt
+* Improved lateral and longitudinal tuning
+* Dashboard cruise control display speed spoofing for vehicles with pedal interceptor
+* Extra steering wheel button functionality for vehicles with pedal interceptor
+* Optional toggle to boot comma when remote starting your vehicle
 
-The equivalent SSH fallback remains:
+## Developer Features
 
-```bash
-cd /data/tss3-oracle
-./tss3-request-signer doctor
-./tss3-request-signer install /tmp/request-signer-install.json
-cd /data/openpilot
-python3 -c 'from openpilot.common.params import Params; Params().put_bool("OnroadCycleRequested", True)'
-```
+* Native and cross compilation for Windows, Mac, and Ubuntu
+* Custom AGNOS to support C3, C3X, and C4
+* Raylib UI on C3, C3X, and C4
+* To run UI on PC:
+  * `./c3` for large UI
+  * `./c4` for small UI
+* `./build` to produce cross compiled binaries for comma devices.
+Uses your comma's sysroot/toolchain
+* Toggle: "Use Precompiled Binaries" to allow switching between fast boot / editable builds
+* Custom long maneuver tests, specifically designed for regen-only vehicles
 
-Wait for openpilot to cycle back onroad before testing; this last command makes
-`pandad` leave diagnostic mode and reapply the Corolla safety configuration.
+## Third-Party Notices
 
-Do not drive or power the vehicle off during either install path. This loads
-volatile EPS RAM only; it does not write persistent EPS firmware.
+* Portions of this software include modified versions of the Material Design Icons provided by Google under the Apache License 2.0. A copy of the license is included in the `LICENSE-MDI` file.
+* Ford support includes software adapted from BluePilot's `bp-7.0` branch. The source repository contains both a standard MIT notice and a separate custom SUNNYPILOT LLC notice; StarPilot preserves both in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+* Hyundai, Kia, and Genesis support includes software adapted directly from sunnypilot's HKG angle-steering branch and sunnypilot/opendbc. StarPilot preserves the applicable notices in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Automatic matching needs several full `rlog` segments from this exact car,
-covering startup, standstill, forward driving, reverse, turn signals, doors,
-braking, cruise transitions, and other infrequent messages. A `qlog` is too
-sparse. Generate a review candidate offline with:
-
-```bash
-PYTHONPATH=.:opendbc_repo python tools/corolla_tss3_fingerprint.py \
-  route-a--0--rlog.zst route-a--1--rlog.zst --bus 0
-```
-
-The tool unions every address below `0x800`, rejects changing DLCs, rejects
-short captures, and reports whether the last segment still adds addresses. It
-prints a candidate; it does not modify `fingerprints.py`. Add a candidate only
-after it has converged and is distinguishable from other supported platforms.
-
-## What changed
-
-The port adds `TOYOTA_COROLLA_TSS3`, target-specific state parsing, the unified
-TSS3 host-application DBC, a pipelined signer transport, and a Corolla-specific
-Panda safety mode. The controller:
-
-- builds the complete 28-byte host application at normal 100 Hz control cadence;
-- sends it through four classic `0x777` frames on bus 0;
-- matches the EPS `0x7A9` response by sequence and appends `FV4||MAC28`;
-- publishes the resulting 32-byte signed `0x08A` on bus 0;
-- supersedes a missing response when a later signer sequence arrives, without
-  replaying stale actuator state;
-- releases replacement ownership on disable, CAN invalidity, signer failure,
-  or watchdog expiry.
-
-The detailed field map, evidence pins, and implementation boundaries are in
-[docs/COROLLA_2025_TSS3_PORT.md](docs/COROLLA_2025_TSS3_PORT.md).
-
-## Safety boundaries
-
-The experimental TSS3 Panda mode is available only when Panda is built with
-`ALLOW_DEBUG`. Its transmit allowlist contains the exact eight-byte signer admin
-and four-frame `0x777` request carrier on bus 0, plus 32-byte signed `0x08A`
-on bus 0. Legacy `0x160`, `0x1A0`, older Toyota steering messages, and unrelated
-addresses remain blocked.
-
-Panda validates the complete host-application shape, requires zero acceleration
-in both request fields, gates active lateral requests on controls state, limits
-the Corolla request to 55 degrees, and applies angle-command rate checks using
-the E210 wheelbase and steering ratio. Native `0x08A` forwarding resumes if host
-publication disappears for 100 ms.
-
-A production Panda build does not enable this experimental safety allowlist and
-will reject the signer transport and host `0x08A`. That is intentional until the
-remaining vehicle-level policy and validation work is complete.
-
-## Known vehicle behavior
-
-- Earlier source notes report both lateral and longitudinal control through the
-  superseded camera-`0x160` experiment; this branch does not enable that path.
-- The 100 Hz benchmark lost sequences 3, 20, 55, 80, and 91 while later replies
-  continued. Its install log also reported `rx_buffer_overflow: 1733`, so Panda
-  receive pressure remains a metric to investigate even though the bounded
-  runtime pipeline tolerates isolated response loss.
-- The shared DBC decodes retained turn-signal traffic, but its behavior still
-  needs dynamic validation on this car before it is treated as authoritative.
-- The Toyota hands-on-wheel warning appears to be enforced by a torque timeout.
-  No verified CAN suppression was found; hands-on use remains required.
-- The combined driver-torque signal on `0x030` is decoded. Its current 0.6 Nm
-  steering-pressed threshold is inherited from the TSS3 integration and still
-  needs dynamic Corolla validation.
-- The platform uses the US-sedan E210 values of 3,060 lb, 2.70 m wheelbase,
-  and 13.9 steering ratio. The wheelbase is corroborated by the 2023 US-built
-  Corolla SE research package; the exact steering ratio still needs direct
-  validation on the 2025 Hybrid.
-
-## Offline checks
-
-The focused GitHub workflow builds the Panda safety test library and runs the
-Corolla controller, Panda safety, and fingerprint-tool tests. Locally, with the
-project dependencies available:
-
-```bash
-export PYTHONPATH="$PWD:$PWD/opendbc_repo"
-export ALLOW_DEBUG=1
-python -m compileall -q opendbc_repo/opendbc/car/toyota
-scons -C opendbc_repo/opendbc/safety/tests -D -j2
-pytest -q opendbc_repo/opendbc/car/toyota/tests/test_tss3.py
-pytest -q opendbc_repo/opendbc/car/toyota/tests/test_tss3_corolla.py
-pytest -q opendbc_repo/opendbc/car/toyota/tests/test_tss3_transport.py
-pytest -q opendbc_repo/opendbc/safety/tests/test_toyota_tss3.py
-pytest -q tools/tests/test_corolla_tss3_fingerprint.py tools/tests/test_corolla_tss3_census.py
-```
-
-## Related repositories and provenance
-
-- [spanconstant5/2025fwpatch](https://github.com/spanconstant5/2025fwpatch) is
-  the separate EPS firmware patch project. Its 2025 dump verifier is complete,
-  but its runtime flasher remains blocked for the 2025 secondary F181 until the
-  retained payload and route are proved on that target.
-- [kaikozlov/ghidra_rh850](https://github.com/kaikozlov/ghidra_rh850) is the
-  evidence authority for the 2025 EPS identity and application comparison.
-- This repository is based on
-  [firestar5683/StarPilot](https://github.com/firestar5683/StarPilot) commit
-  `823a5d5674ec6635b51dd989884dfbd661f90dc4` (StarPilot branch tip on
-  2026-10-23).
-- The supplied working control implementation originated from a sunnypilot
-  port. Its measured behavior and limitations are retained in the port notes.
-
-The StarPilot README from the port's original `ac3fb6a4` base is preserved at
-[docs/STARPILOT_UPSTREAM_README.md](docs/STARPILOT_UPSTREAM_README.md) for
-historical comparison. Existing license and third-party notice files remain
-authoritative for inherited code.
+> This project uses software from Haibin Wen and SUNNYPILOT LLC and is licensed under a custom license requiring permission for use.

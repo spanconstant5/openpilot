@@ -2,12 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 from opendbc.car.can_definitions import CanData
-from opendbc.car.car_helpers import (FRAME_FINGERPRINT, _apply_starpilot_access_policy, _get_gm_stored_candidate_fallback,
-                                     _get_toyota_tss3_census_candidate, _normalize_gm_suburban_camera_candidate,
-                                     _should_skip_fw_query_for_stored_tss3, can_fingerprint,
-                                     create_corolla_tss3_fingerprint_keepalive)
-from opendbc.car.toyota.tss3 import NATIVE_08A_ADDR, ORACLE_REQUEST_ADDR, ORACLE_RESPONSE_ADDR
-from opendbc.car.toyota.tss3_census import COROLLA_TSS3_ADAS_CENSUS, COROLLA_TSS3_CAN_CENSUS, matches_corolla_tss3_recovery_census
+from opendbc.car.car_helpers import FRAME_FINGERPRINT, _apply_starpilot_access_policy, _get_gm_stored_candidate_fallback, _normalize_gm_suburban_camera_candidate, can_fingerprint
 from opendbc.car.fingerprints import _FINGERPRINTS as FINGERPRINTS
 from opendbc.car.gm.values import CAR as GM
 from opendbc.car.toyota.values import CAR as TOYOTA
@@ -82,20 +77,6 @@ class TestCanFingerprint:
         assert car_fingerprint == car_model
         assert frames == expected_frames + 2  # TODO: fix extra frames
 
-  def test_fingerprint_callback_observes_every_can_batch(self):
-    can_packet = [CanData(address=1, dat=b'\0', src=0)]
-    callbacks = []
-    frames = 0
-
-    def can_recv(**kwargs):
-      nonlocal frames
-      frames += 1
-      return [can_packet]
-
-    can_fingerprint(can_recv, callbacks.append)
-
-    assert callbacks == [can_packet] * frames
-
   def test_gm_stored_candidate_fallback_prefers_persisted_model(self):
     fingerprints = {0: {190: 6, 201: 8, 209: 7, 211: 2, 241: 6}}
 
@@ -130,92 +111,6 @@ class TestCanFingerprint:
     candidate = _get_gm_stored_candidate_fallback(fingerprints, "CHEVROLET_VOLT_CC", "CHEVROLET_VOLT_CC")
 
     assert candidate is None
-
-  @staticmethod
-  def _corolla_tss3_recovery_fingerprint():
-    return {
-      0: dict(COROLLA_TSS3_CAN_CENSUS),
-      1: dict(COROLLA_TSS3_ADAS_CENSUS),
-      2: dict(COROLLA_TSS3_CAN_CENSUS),
-    }
-
-  def test_corolla_tss3_recovery_requires_complete_three_bus_topology(self):
-    fingerprints = self._corolla_tss3_recovery_fingerprint()
-
-    assert matches_corolla_tss3_recovery_census(fingerprints)
-    assert _get_toyota_tss3_census_candidate(fingerprints, TOYOTA.TOYOTA_COROLLA_TSS3) == TOYOTA.TOYOTA_COROLLA_TSS3
-    assert _get_toyota_tss3_census_candidate(fingerprints, "MOCK") is None
-
-  @pytest.mark.parametrize("stored_candidate", [TOYOTA.TOYOTA_COROLLA_TSS3, str(TOYOTA.TOYOTA_COROLLA_TSS3),
-                                                 str(TOYOTA.TOYOTA_COROLLA_TSS3).encode()])
-  def test_corolla_tss3_stored_selection_skips_unproductive_fw_query(self, stored_candidate):
-    assert _should_skip_fw_query_for_stored_tss3(stored_candidate)
-
-  @pytest.mark.parametrize("stored_candidate", [None, "", "MOCK", TOYOTA.TOYOTA_COROLLA_TSS2])
-  def test_other_stored_selections_keep_fw_query(self, stored_candidate):
-    assert not _should_skip_fw_query_for_stored_tss3(stored_candidate)
-
-  def test_corolla_tss3_fingerprint_keepalive_is_inactive_and_tracks_response(self):
-    sent = []
-    keepalive = create_corolla_tss3_fingerprint_keepalive(TOYOTA.TOYOTA_COROLLA_TSS3, sent.extend)
-    assert keepalive is not None
-
-    keepalive.update([CanData(NATIVE_08A_ADDR, bytes(32), 0)], now_nanos=900_000_000)
-    assert sent == []
-    keepalive.update([CanData(NATIVE_08A_ADDR, bytes(32), 2)], now_nanos=1_000_000_000)
-    requests = [msg for msg in sent if msg.address == ORACLE_REQUEST_ADDR]
-    assert [msg.dat[0] for msg in requests] == [0x81, 0x90, 0xA1, 0xB0]
-    assert b"".join(msg.dat[1:] for msg in requests) == bytes.fromhex(
-      "0000000880002d4700000000007fff007fff0000c000100032000100"
-    )
-    assert not any(msg.address == NATIVE_08A_ADDR for msg in sent)
-    assert not keepalive.transport.control_enabled
-    assert not keepalive.transport.control_long_active
-    assert keepalive.transport.control_accel == 0.0
-
-    # card's post-fingerprint parser path uses raw (address, data, bus) tuples.
-    # Keep the same inactive transport alive across that representation change.
-    sent.clear()
-    keepalive.update([(NATIVE_08A_ADDR, bytes(32), 0)], now_nanos=1_010_000_000)
-    assert sent == []
-
-    response = CanData(ORACLE_RESPONSE_ADDR, bytes.fromhex("c90100fe58a4166f"), 0)
-    sent.clear()
-    keepalive.update([response], now_nanos=1_020_000_000)
-    assert keepalive.transport.signer_ready()
-    requests = [msg for msg in sent if msg.address == ORACLE_REQUEST_ADDR]
-    assert [msg.dat[0] for msg in requests] == [0x82, 0x90, 0xA2, 0xB0]
-    assert not any(msg.address == NATIVE_08A_ADDR for msg in sent)
-
-    # No response means no further live-cadence request. Once the 90 ms
-    # response deadline passes, the normal 100 ms startup retry applies.
-    sent.clear()
-    keepalive.update(now_nanos=2_020_000_000)
-    requests = [msg for msg in sent if msg.address == ORACLE_REQUEST_ADDR]
-    assert [msg.dat[0] for msg in requests] == [0x83, 0x90, 0xA3, 0xB0]
-    assert not any(msg.address == NATIVE_08A_ADDR for msg in sent)
-
-  @pytest.mark.parametrize("stored_candidate", [None, "MOCK", TOYOTA.TOYOTA_COROLLA_TSS2])
-  def test_other_stored_selections_do_not_create_tss3_fingerprint_keepalive(self, stored_candidate):
-    assert create_corolla_tss3_fingerprint_keepalive(stored_candidate, lambda _msgs: None) is None
-
-  def test_corolla_tss3_recovery_rejects_missing_mirrored_plane(self):
-    fingerprints = self._corolla_tss3_recovery_fingerprint()
-    fingerprints[2] = {}
-
-    assert not matches_corolla_tss3_recovery_census(fingerprints)
-
-  def test_corolla_tss3_recovery_rejects_wrong_vehicle_dlc(self):
-    fingerprints = self._corolla_tss3_recovery_fingerprint()
-    fingerprints[0][0x08A] = 8
-
-    assert not matches_corolla_tss3_recovery_census(fingerprints)
-
-  def test_corolla_tss3_recovery_rejects_incomplete_adas_plane(self):
-    fingerprints = self._corolla_tss3_recovery_fingerprint()
-    del fingerprints[1][0x160]
-
-    assert not matches_corolla_tss3_recovery_census(fingerprints)
 
   def test_starpilot_access_policy_ignores_stale_block_user_toggle(self):
     candidate = _apply_starpilot_access_policy("CHEVROLET_VOLT_CC", SimpleNamespace(block_user=True))

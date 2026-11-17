@@ -9,12 +9,9 @@ from opendbc.car.common.pid import PIDController
 from opendbc.car.secoc import add_mac, build_sync_mac
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.toyota import toyotacan
-from opendbc.car.toyota.tss3 import COROLLA_ORACLE_PROFILE, ToyotaTss3RequestTransport
 from opendbc.car.toyota.values import CAR, MIN_ACC_SPEED, NO_STOP_TIMER_CAR, PEDAL_TRANSITION, TSS2_CAR, \
                                         CarControllerParams, ToyotaFlags, ToyotaSafetyFlags, \
-                                        UNSUPPORTED_DSU_CAR, LEGACY_PRIUS_CAR, TOYOTA_AUTO_HOLD_CARS, \
-                                        TSS3_MAX_STEER_ANGLE, \
-                                        uses_toyota_auto_hold_aeb
+                                        UNSUPPORTED_DSU_CAR, LEGACY_PRIUS_CAR, TOYOTA_AUTO_HOLD_CARS, uses_toyota_auto_hold_aeb
 from opendbc.can import CANPacker
 
 Ecu = structs.CarParams.Ecu
@@ -284,14 +281,6 @@ class CarController(CarControllerBase):
     self.doors_locked = False
     self.brake_hold_active = False
     self._brake_hold_counter = 0
-    self.tss3_request_transport = None
-    if self.CP.carFingerprint == CAR.TOYOTA_COROLLA_TSS3:
-      signer_packer = CANPacker("toyota_tss3_pt_generated")
-      self.tss3_request_transport = ToyotaTss3RequestTransport(signer_packer, COROLLA_ORACLE_PROFILE)
-
-  def observe_tss3_request_plane(self, can_packets, can_valid: bool) -> None:
-    if self.tss3_request_transport is not None:
-      self.tss3_request_transport.observe(can_packets, can_valid)
 
   def _compute_interceptor_gas_cmd(self, CC, CS):
     if self.brake_hold_active or not (self.CP.enableGasInterceptorDEPRECATED and self.CP.openpilotLongitudinalControl and CC.longActive):
@@ -389,44 +378,6 @@ class CarController(CarControllerBase):
 
     # *** control msgs ***
     can_sends = []
-
-    if self.CP.flags & ToyotaFlags.CAN_FD.value:
-      # Corolla's EPS-resident signer accepts a 28-byte application over four
-      # classic 0x777 frames on bus 0 and returns FV4||MAC28 on 0x7A9. The host
-      # publishes the resulting signed 0x08A at the normal 100 Hz control rate.
-      # Longitudinal stays stock until it is separately qualified on this car.
-      lat_controlling = CC.enabled and CC.latActive
-      desired_angle = actuators.steeringAngleDeg + CS.out.steeringAngleOffsetDeg
-      measured_angle = CS.out.steeringAngleDeg + CS.out.steeringAngleOffsetDeg
-      create_lateral_application = not lat_controlling or self.tss3_request_transport.control_generation_due(
-        enabled=CC.enabled,
-        lat_active=lat_controlling,
-        long_active=False,
-      )
-      if create_lateral_application:
-        self.last_angle = apply_std_steer_angle_limits(
-          desired_angle, self.last_angle, CS.out.vEgoRaw, measured_angle,
-          lat_controlling, self.params.ANGLE_LIMITS,
-        )
-      applied_angle = float(np.clip(self.last_angle, -TSS3_MAX_STEER_ANGLE, TSS3_MAX_STEER_ANGLE))
-      applied_accel = 0.0
-
-      if self.tss3_request_transport is not None:
-        can_sends.extend(self.tss3_request_transport.update_control(
-          enabled=CC.enabled,
-          lat_active=lat_controlling,
-          target_angle_deg=applied_angle,
-          long_active=False,
-          accel=0.0,
-          set_speed_kph=CS.out.vCruise,
-          now_nanos=now_nanos,
-        ))
-
-      new_actuators = actuators.as_builder()
-      new_actuators.steeringAngleDeg = applied_angle
-      new_actuators.accel = applied_accel
-      self.frame += 1
-      return new_actuators, can_sends
 
     # *** handle secoc reset counter increase ***
     if self.CP.flags & ToyotaFlags.SECOC.value:

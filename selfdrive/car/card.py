@@ -17,13 +17,9 @@ from opendbc.car import DT_CTRL, ButtonType, structs
 from opendbc.car.can_definitions import CanData, CanRecvCallable, CanSendCallable
 from opendbc.car.carlog import carlog
 from opendbc.car.fw_versions import ObdCallback
-from opendbc.car.car_helpers import create_corolla_tss3_fingerprint_keepalive, get_car, interfaces
+from opendbc.car.car_helpers import get_car, interfaces
 from opendbc.car.interfaces import CarInterfaceBase, RadarInterfaceBase
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
-from openpilot.selfdrive.car.toyota_tss3_request_signer import (
-  COROLLA_TSS3_MODEL, release_tss3_startup_bridge, tss3_startup_bridge_release_ready,
-  tss3_startup_bridge_token,
-)
 from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.common.constants import CV
 from openpilot.selfdrive.car.cruise import (
@@ -103,13 +99,10 @@ class Car:
 
   FPCP: custom.StarPilotCarParams
 
-  def __init__(self, CI=None, RI=None, can_sock=None, pm=None) -> None:
-    self.tss3_startup_bridge_token = tss3_startup_bridge_token()
-    self.can_sock = can_sock if can_sock is not None else messaging.sub_sock('can', timeout=20)
+  def __init__(self, CI=None, RI=None) -> None:
+    self.can_sock = messaging.sub_sock('can', timeout=20)
     self.sm = messaging.SubMaster(['pandaStates', 'carControl', 'onroadEvents', 'radarState', 'longitudinalPlan'])
-    self.pm = pm if pm is not None else messaging.PubMaster(
-      ['sendcan', 'carState', 'carParams', 'carOutput', 'liveTracks', 'starpilotCarControl'],
-    )
+    self.pm = messaging.PubMaster(['sendcan', 'carState', 'carParams', 'carOutput', 'liveTracks', 'starpilotCarControl'])
     self.gps_pm = None
 
     self.can_rcv_cum_timeout_counter = 0
@@ -131,28 +124,16 @@ class Car:
     self._favorite_virtual_releases = []
 
     self.can_callbacks = can_comm_callbacks(self.can_sock, self.pm.sock['sendcan'])
-    self.fingerprint_keepalive = None
 
     is_release = False
 
     if CI is None:
-      allow_tss3_fingerprint_keepalive = not os.environ.get('FINGERPRINT') and not self.params.get_bool("NAPForcePreAP")
-      if allow_tss3_fingerprint_keepalive:
-        self.fingerprint_keepalive = create_corolla_tss3_fingerprint_keepalive(self.params.get("CarModel"), self.can_callbacks[1])
-
       # wait for one pandaState and one CAN packet
       print("Waiting for CAN messages...")
       while True:
         can = messaging.recv_one_retry(self.can_sock)
         if len(can.can) > 0:
           break
-
-      # Native pandad is now receiving CAN and its send thread is available.
-      # Start the inactive signer challenge before waiting on any other startup
-      # service; fingerprint() keeps the same transport alive through census.
-      if self.fingerprint_keepalive is not None:
-        initial_frames = [CanData(msg.address, bytes(msg.dat), msg.src) for msg in can.can]
-        self.fingerprint_keepalive.update(initial_frames)
 
       alpha_long_allowed = self.params.get_bool("AlphaLongitudinalEnabled")
       num_pandas = len(messaging.recv_one_retry(self.sm.sock['pandaStates']).pandaStates)
@@ -164,12 +145,9 @@ class Car:
           cached_params = _cached_params
 
       self.CI = get_car(*self.can_callbacks, obd_callback(self.params), alpha_long_allowed, is_release, self.params, num_pandas, cached_params,
-                        get_starpilot_toggles(read_persisted_force_params=True), fingerprint_keepalive=self.fingerprint_keepalive)
+                        get_starpilot_toggles(read_persisted_force_params=True))
       self.RI = interfaces[self.CI.CP.carFingerprint].RadarInterface(self.CI.CP)
       self.CP = self.CI.CP
-      if self.CP.carFingerprint != COROLLA_TSS3_MODEL:
-        self.fingerprint_keepalive = None
-        release_tss3_startup_bridge(self.tss3_startup_bridge_token)
 
       # continue onto next fingerprinting step in pandad
       self.params.put_bool("FirmwareQueryDone", True)
@@ -313,24 +291,6 @@ class Car:
 
     # Update carState from CAN
     CS, FPCS = self.CI.update(can_list, self.starpilot_toggles)
-    if self.fingerprint_keepalive is not None:
-      if CS.canValid:
-        # The normal Toyota interface takes over preflight on this same step.
-        self.fingerprint_keepalive = None
-      elif can_list:
-        for nanos, frames in can_list:
-          self.fingerprint_keepalive.update(frames, nanos)
-      else:
-        self.fingerprint_keepalive.update([])
-    if (self.tss3_startup_bridge_token is not None and
-        tss3_startup_bridge_release_ready(self.CP.carFingerprint, CS.canValid, self.params.get_bool("IsOnroad"))):
-      # Fingerprinting may have finished while card was prewarmed. Keep the
-      # token lease until valid Corolla CAN is flowing onroad, then hand normal
-      # startup ownership back without changing safety selection.
-      self.params.put_bool("FirmwareQueryDone", True)
-      release_tss3_startup_bridge(self.tss3_startup_bridge_token)
-      self.tss3_startup_bridge_token = None
-      carlog.info("Toyota TSS3 startup bridge released after live CarState handoff")
     if self.CP.brand == 'mock':
       CS, FPCS = self.mock_carstate.update(CS, FPCS)
     self._inject_favorite_virtual_cruise_events(CS)
@@ -529,16 +489,6 @@ class Car:
 
       self.CC_prev = CC
 
-  def startup_control_update(self, CS: car.CarState):
-    """Send interface-owned inactive startup traffic before controls are ready."""
-    get_startup_can_sends = getattr(self.CI, 'get_startup_can_sends', None)
-    if get_startup_can_sends is None:
-      return
-    now_nanos = self.can_log_mono_time if REPLAY else int(time.monotonic() * 1e9)
-    can_sends = get_startup_can_sends(now_nanos)
-    if can_sends:
-      self.pm.send('sendcan', can_list_to_can_capnp(can_sends, msgtype='sendcan', valid=CS.canValid))
-
   def _update_openpilot_lead_state(self, CC: car.CarControl) -> None:
     lead_visible = bool(CC.hudControl.leadVisible)
     longitudinal_adjustment_active = lead_visible
@@ -638,10 +588,6 @@ class Car:
                    self.sm.seen['onroadEvents'])
     if not self.CP.passive and initialized:
       self.controls_update(CS, self.sm['carControl'])
-      if not self.sm.all_alive(['carControl']):
-        self.startup_control_update(CS)
-    elif not self.CP.passive:
-      self.startup_control_update(CS)
 
     self.initialized_prev = initialized
     self.CS_prev = CS

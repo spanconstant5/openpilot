@@ -24,11 +24,6 @@ void PandaSafety::updateMultiplexingMode() {
   if (!initialized_) {
     prev_obd_multiplexing_ = false;
     for (int i = 0; i < pandas_.size(); ++i) {
-      // Match Python Panda's deterministic transmit setup while fingerprinting.
-      // The selected vehicle safety mode restores automatic FD where appropriate.
-      for (uint16_t bus = 0; bus < PANDA_CAN_CNT; ++bus) {
-        pandas_[i]->set_can_fd_auto(bus, false);
-      }
       pandas_[i]->set_safety_model(cereal::CarParams::SafetyModel::ELM327, 1U);
     }
     initialized_ = true;
@@ -63,8 +58,6 @@ std::string PandaSafety::fetchCarParams() {
 }
 
 void PandaSafety::setSafetyMode(const std::string &params_string) {
-  constexpr uint16_t TOYOTA_PARAM_TSS3_SIGNER = 16U << 8;
-
   AlignedBuffer aligned_buf;
   capnp::FlatArrayMessageReader cmsg(aligned_buf.align(params_string.data(), params_string.size()));
   cereal::CarParams::Reader car_params = cmsg.getRoot<cereal::CarParams>();
@@ -91,17 +84,6 @@ void PandaSafety::setSafetyMode(const std::string &params_string) {
 
     if (i < starpilot_safety_configs.size()) {
       safety_param |= starpilot_safety_configs[i].getSafetyParam();
-    }
-
-    // Automatic FD is bus-wide and becomes sticky after any received FD frame.
-    // On TSS3 that would promote the eight-byte 0x777 signer request to FD.
-    // Disable promotion and let Panda::pack_can_buffer select Classical/FD from
-    // each packet's length. Preserve the existing automatic behavior elsewhere.
-    const bool toyota_tss3_signer =
-      safety_model == cereal::CarParams::SafetyModel::TOYOTA &&
-      (safety_param & TOYOTA_PARAM_TSS3_SIGNER) != 0U;
-    for (uint16_t bus = 0; bus < PANDA_CAN_CNT; ++bus) {
-      pandas_[i]->set_can_fd_auto(bus, !toyota_tss3_signer);
     }
 
     LOGW("Panda %d: setting safety model: %d, param: %d, alternative experience: %d", i, (int)safety_model, safety_param, alternative_experience);

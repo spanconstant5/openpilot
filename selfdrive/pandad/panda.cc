@@ -215,10 +215,6 @@ void Panda::pack_can_buffer(const capnp::List<cereal::CanData>::Reader &can_data
     can_header header = {};
     header.addr = cmsg.getAddress();
     header.extended = (cmsg.getAddress() >= 0x800) ? 1 : 0;
-    // Keep the wire format packet-local when automatic CAN-FD promotion is
-    // disabled. TSS3 signer requests are eight-byte Classical CAN, while its
-    // neighboring 32-byte traffic remains CAN-FD.
-    header.fd = can_data.size() > 8U ? 1U : 0U;
     header.data_len_code = data_len_code;
     header.bus = bus - bus_offset;
     header.checksum = 0;

@@ -1,22 +1,18 @@
 import os
 import time
 
-from collections.abc import Callable
 from types import SimpleNamespace
 
 from cereal import custom
-from opendbc.can import CANPacker
 from opendbc.car import gen_empty_fingerprint
-from opendbc.car.can_definitions import CanData, CanRecvCallable, CanSendCallable
+from opendbc.car.can_definitions import CanRecvCallable, CanSendCallable
 from opendbc.car.carlog import carlog
 from opendbc.car.structs import CarParams, CarParamsT
 from opendbc.car.fingerprints import eliminate_incompatible_cars, all_legacy_fingerprint_cars
 from opendbc.car.fw_versions import ObdCallback, get_fw_versions_ordered, get_present_ecus, match_fw_to_car
 from opendbc.car.hyundai.values import kia_ray_ev_vin
 from opendbc.car.mock.values import CAR as MOCK
-from opendbc.car.toyota.tss3 import COROLLA_ORACLE_PROFILE, ORACLE_STARTUP_PREFLIGHT_RETRY_NS, ToyotaTss3RequestTransport
-from opendbc.car.toyota.tss3_census import matches_corolla_tss3_recovery_census
-from opendbc.car.toyota.values import CAR as TOYOTA, ToyotaSafetyFlags
+from opendbc.car.toyota.values import ToyotaSafetyFlags
 from opendbc.car.values import BRANDS
 from opendbc.car.vin import get_vin, is_valid_vin, VIN_UNKNOWN
 from openpilot.common.params import Params
@@ -24,7 +20,6 @@ from openpilot.common.params import Params
 FRAME_FINGERPRINT = 100  # 1s
 
 StarPilotCarParams = custom.StarPilotCarParams
-FingerprintCallback = Callable[[list[CanData]], None]
 
 
 def load_interfaces(brand_names):
@@ -84,53 +79,6 @@ def _normalize_forced_candidate(candidate: str | None) -> str | None:
     candidate = candidate.decode("utf-8", errors="ignore")
   candidate = str(candidate)
   return LEGACY_FORCED_CANDIDATE_MAP.get(candidate, candidate)
-
-
-def _should_skip_fw_query_for_stored_tss3(stored_candidate: str | None) -> bool:
-  return _normalize_forced_candidate(stored_candidate) == str(TOYOTA.TOYOTA_COROLLA_TSS3)
-
-
-class CorollaTss3FingerprintKeepalive:
-  """Maintain the proven inactive signer session until CarInterface exists."""
-
-  def __init__(self, can_send: CanSendCallable):
-    self.can_send = can_send
-    self.native_08a_buses: set[int] = set()
-    self.transport = ToyotaTss3RequestTransport(
-      CANPacker("toyota_tss3_pt_generated"), COROLLA_ORACLE_PROFILE,
-      preflight_retry_interval_ns=ORACLE_STARTUP_PREFLIGHT_RETRY_NS,
-    )
-    self.transport.observe([], True)
-
-  def update(self, can_packet: list[CanData] | None = None, now_nanos: int | None = None) -> None:
-    now_nanos = time.monotonic_ns() if now_nanos is None else int(now_nanos)
-    if can_packet:
-      self.native_08a_buses.update(
-        int(src) for address, dat, src in can_packet
-        if int(address) == 0x08A and len(bytes(dat)) == 32 and int(src) in (0, 2)
-      )
-    # Stored identity is necessary but not sufficient for pre-census traffic:
-    # also require the live mirrored 32-byte TSS3 application plane.
-    if self.native_08a_buses != {0, 2}:
-      return
-    if can_packet:
-      self.transport.observe([(now_nanos, can_packet)], True)
-    sends = self.transport.update_control(
-      enabled=False,
-      lat_active=False,
-      target_angle_deg=0.0,
-      long_active=False,
-      accel=0.0,
-      set_speed_kph=0.0,
-      now_nanos=now_nanos,
-    )
-    if sends:
-      self.can_send(sends)
-
-
-def create_corolla_tss3_fingerprint_keepalive(stored_candidate: str | None,
-                                               can_send: CanSendCallable) -> CorollaTss3FingerprintKeepalive | None:
-  return CorollaTss3FingerprintKeepalive(can_send) if _should_skip_fw_query_for_stored_tss3(stored_candidate) else None
 
 
 def _normalize_gm_bolt_candidate(candidate: str | None, fingerprints: dict[int, dict], vin: str | None = None) -> str | None:
@@ -256,19 +204,13 @@ def _get_gm_stored_candidate_fallback(fingerprints: dict[int, dict], stored_cand
   return None
 
 
-def _get_toyota_tss3_census_candidate(fingerprints: dict[int, dict], stored_candidate: str | None) -> str | None:
-  if stored_candidate == TOYOTA.TOYOTA_COROLLA_TSS3 and matches_corolla_tss3_recovery_census(fingerprints):
-    return str(TOYOTA.TOYOTA_COROLLA_TSS3)
-  return None
-
-
 def _apply_starpilot_access_policy(candidate: str, starpilot_toggles: SimpleNamespace | None) -> str:
   # Branch-based dashcam gating was removed. Keep the resolved candidate even if
   # an older serialized toggle payload still contains block_user=True.
   return candidate
 
 
-def can_fingerprint(can_recv: CanRecvCallable, fingerprint_callback: FingerprintCallback | None = None) -> tuple[str | None, dict[int, dict]]:
+def can_fingerprint(can_recv: CanRecvCallable) -> tuple[str | None, dict[int, dict]]:
   finger = gen_empty_fingerprint()
   candidate_cars = {i: all_legacy_fingerprint_cars() for i in [0, 1]}  # attempt fingerprint on both bus 0 and 1
   frame = 0
@@ -278,11 +220,7 @@ def can_fingerprint(can_recv: CanRecvCallable, fingerprint_callback: Fingerprint
   while not done:
     # can_recv(wait_for_one=True) may return zero or multiple packets, so we increment frame for each one we receive
     can_packets = can_recv(wait_for_one=True)
-    if fingerprint_callback is not None and not can_packets:
-      fingerprint_callback([])
     for can_packet in can_packets:
-      if fingerprint_callback is not None:
-        fingerprint_callback(can_packet)
       for can in can_packet:
         # The fingerprint dict is generated for all buses, this way the car interface
         # can use it to detect a (valid) multipanda setup and initialize accordingly
@@ -315,23 +253,11 @@ def can_fingerprint(can_recv: CanRecvCallable, fingerprint_callback: Fingerprint
 
 # **** for use live only ****
 def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multiplexing: ObdCallback, num_pandas: int,
-                cached_params: CarParamsT | None, fingerprint_keepalive: CorollaTss3FingerprintKeepalive | None = None
-                ) -> tuple[str | None, dict, str, list[CarParams.CarFw], CarParams.FingerprintSource, bool]:
+                cached_params: CarParamsT | None) -> tuple[str | None, dict, str, list[CarParams.CarFw], CarParams.FingerprintSource, bool]:
   fixed_fingerprint = os.environ.get('FINGERPRINT', "")
   skip_fw_query = os.environ.get('SKIP_FW_QUERY', False)
   disable_fw_cache = os.environ.get('DISABLE_FW_CACHE', False)
   ecu_rx_addrs = set()
-
-  stored_candidate = Params().get("CarModel")
-  usable_fw_cache = (cached_params is not None and cached_params.brand != "mock" and len(cached_params.carFw) > 0 and
-                     cached_params.carVin != VIN_UNKNOWN)
-  if (not fixed_fingerprint and not skip_fw_query and not disable_fw_cache and not usable_fw_cache and
-      _should_skip_fw_query_for_stored_tss3(stored_candidate)):
-    # The exact Corolla is recovered only after its complete three-bus live CAN
-    # census matches. Avoid spending the volatile signer's startup lifetime on
-    # a firmware query which has yielded no identifying firmware on this car.
-    skip_fw_query = True
-    carlog.warning("Stored Corolla TSS3 selection: using CAN-only fingerprint to preserve signer liveness")
 
   if not fixed_fingerprint and Params().get_bool("NAPForcePreAP"):
     fixed_fingerprint = "TESLA_MODEL_S_PREAP"
@@ -380,17 +306,8 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
 
   # CAN fingerprint
   # drain CAN socket so we get the latest messages
-  drained_packets = can_recv()
-  if fingerprint_keepalive is not None:
-    if drained_packets:
-      for can_packet in drained_packets:
-        fingerprint_keepalive.update(can_packet)
-    else:
-      fingerprint_keepalive.update([])
-  car_fingerprint, finger = can_fingerprint(
-    can_recv,
-    fingerprint_callback=fingerprint_keepalive.update if fingerprint_keepalive is not None else None,
-  )
+  can_recv()
+  car_fingerprint, finger = can_fingerprint(can_recv)
 
   exact_match = True
   source = CarParams.FingerprintSource.can
@@ -413,11 +330,8 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
 
 
 def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multiplexing: ObdCallback, alpha_long_allowed: bool,
-            is_release: bool, params: Params, num_pandas: int = 1, cached_params: CarParamsT | None = None,
-            starpilot_toggles: SimpleNamespace = None, fingerprint_keepalive: CorollaTss3FingerprintKeepalive | None = None):
-  candidate, fingerprints, vin, car_fw, source, exact_match = fingerprint(
-    can_recv, can_send, set_obd_multiplexing, num_pandas, cached_params, fingerprint_keepalive,
-  )
+            is_release: bool, params: Params, num_pandas: int = 1, cached_params: CarParamsT | None = None, starpilot_toggles: SimpleNamespace = None):
+  candidate, fingerprints, vin, car_fw, source, exact_match = fingerprint(can_recv, can_send, set_obd_multiplexing, num_pandas, cached_params)
   candidate = _normalize_gm_bolt_candidate(candidate, fingerprints, vin)
   candidate = _normalize_gm_volt_candidate(candidate, fingerprints)
   candidate = _normalize_forced_candidate(candidate)
@@ -439,18 +353,6 @@ def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multip
         "cached_candidate": cached_candidate,
       })
       candidate = gm_fallback_candidate
-
-  toyota_tss3_candidate = _get_toyota_tss3_census_candidate(fingerprints, stored_candidate) if candidate is None else None
-  if toyota_tss3_candidate is not None:
-    candidate = toyota_tss3_candidate
-    source = CarParams.FingerprintSource.can
-    exact_match = True
-    carlog.error({
-      "event": "recovered Corolla TSS3 from mirrored live census",
-      "candidate": candidate,
-      "stored_candidate": stored_candidate,
-      "cached_candidate": cached_candidate,
-    })
 
   if candidate is None or starpilot_toggles.force_fingerprint:
     if starpilot_toggles.force_fingerprint:

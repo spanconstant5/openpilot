@@ -88,17 +88,6 @@ class TestSoundd:
     soundd.current_sound_frame = 0
     np.testing.assert_array_equal(soundd.get_sound_data(4), np.zeros(4, dtype=np.float32))
 
-  def test_stock_startup_uses_dedicated_clip(self, tmp_path):
-    soundd = Soundd.__new__(Soundd)
-    soundd.sound_directory = tmp_path / "sounds"
-    soundd.sound_directory.mkdir()
-    soundd.random_events_directory = tmp_path / "random_events"
-    soundd.random_events_directory.mkdir()
-
-    candidates = soundd._sound_candidates("startup.wav")
-
-    assert candidates[-1].name == "startup.wav"
-
   def test_load_sounds_falls_back_to_stock_when_custom_is_invalid(self, tmp_path):
     soundd = Soundd.__new__(Soundd)
     soundd.sound_directory = tmp_path / "sounds"

@@ -11,7 +11,6 @@ from openpilot.system.manager.process_config import (
   allow_uploads,
   bluetooth_enabled,
   camera_run,
-  card_run,
   managed_processes,
   sentry_mode,
   soundd_run,
@@ -50,21 +49,6 @@ def test_allow_uploads(started, no_uploads, no_onroad_uploads, always_allow_uplo
 
 def test_uploader_runs_at_background_priority():
   assert managed_processes["uploader"].nice == 19
-
-
-@pytest.mark.parametrize("started,bridge_active,expected", [
-  (False, False, False),
-  (False, True, True),
-  (True, False, True),
-  (True, True, True),
-])
-def test_card_prewarms_for_tss3_signer_handoff(started, bridge_active, expected, monkeypatch):
-  monkeypatch.setattr(process_config, "tss3_startup_bridge_active", lambda: bridge_active)
-  assert card_run(started, SimpleNamespace(), car.CarParams.new_message(), SimpleNamespace()) is expected
-
-
-def test_card_uses_lightweight_launcher_for_offroad_handoff():
-  assert managed_processes["card"].module == "selfdrive.car.card_launcher"
 
 
 def test_mapd_runs_onroad_or_during_offroad_map_transfer(monkeypatch):

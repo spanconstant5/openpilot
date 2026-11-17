@@ -37,7 +37,7 @@ PROCS = {
   # Baseline CPU usage by process
   "selfdrive.controls.controlsd": 16.0,
   "selfdrive.selfdrived.selfdrived": 16.0,
-  "selfdrive.car.card_launcher": 26.0,
+  "selfdrive.car.card": 26.0,
   "./loggerd": 14.0,
   "./encoderd": 13.0,
   "./camerad": 10.0,
@@ -62,7 +62,7 @@ PROCS = {
   "system.journald": 1.0,
   "system.micd": 5.0,
   "system.timed": 0,
-  "openpilot.selfdrive.pandad.pandad": 0,
+  "selfdrive.pandad.pandad": 0,
   "system.statsd": 1.0,
   "system.loggerd.uploader": 15.0,
   "system.loggerd.deleter": 1.0,

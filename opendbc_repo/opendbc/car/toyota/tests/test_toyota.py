@@ -3,7 +3,6 @@ from types import SimpleNamespace
 import pytest
 from hypothesis import given, settings, strategies as st
 
-from cereal import custom
 from opendbc.car import Bus, structs
 from opendbc.can import CANPacker, CANParser
 from opendbc.car.structs import CarParams
@@ -23,7 +22,6 @@ from opendbc.car.toyota.carstate import CarState, LKAS_BUTTON_CAR, calculate_int
 from opendbc.car.toyota.fingerprints import FW_VERSIONS
 from opendbc.car.toyota.interface import CarInterface
 from opendbc.car.toyota.radar_interface import RadarInterface, TSSP_RADAR_EGO_SPEED_SCALE
-from opendbc.car.toyota.tss3 import NATIVE_08A_ADDR, ORACLE_REQUEST_ADDR
 from opendbc.car.toyota.values import CAR, DBC, MIN_ACC_SPEED, TSS2_CAR, ANGLE_CONTROL_CAR, RADAR_ACC_CAR, SECOC_CAR, \
                                                   FW_QUERY_CONFIG, PLATFORM_CODE_ECUS, FUZZY_EXCLUDED_PLATFORMS, \
                                                   ToyotaFlags, ToyotaSafetyFlags, ToyotaStarPilotFlags, TOYOTA_AUTO_HOLD_CARS, \
@@ -41,41 +39,13 @@ def check_fw_version(fw_version: bytes) -> bool:
 
 
 class TestToyotaInterfaces:
-  def test_corolla_tss3_interface_update_returns_starpilot_state_pair(self):
-    cp = CarInterface.get_non_essential_params(CAR.TOYOTA_COROLLA_TSS3)
-    interface = CarInterface(cp, custom.StarPilotCarParams.new_message())
-
-    state, starpilot_state = interface.update([], SimpleNamespace(cluster_offset=1.0))
-
-    assert not state.canValid
-    assert not state.steerFaultTemporary
-    assert state.blockPcmEnable
-    assert starpilot_state is not None
-
-  def test_corolla_tss3_startup_traffic_is_inactive_signer_challenge_only(self):
-    cp = CarInterface.get_non_essential_params(CAR.TOYOTA_COROLLA_TSS3)
-    interface = CarInterface(cp, custom.StarPilotCarParams.new_message())
-    transport = interface.CC.tss3_request_transport
-    transport.observe([], True)
-
-    sends = interface.get_startup_can_sends(1_000_000_000)
-
-    requests = [msg for msg in sends if msg.address == ORACLE_REQUEST_ADDR]
-    assert [msg.dat[0] for msg in requests] == [0x81, 0x90, 0xA1, 0xB0]
-    assert b"".join(msg.dat[1:] for msg in requests) == bytes.fromhex(
-      "0000000880002d4700000000007fff007fff0000c000100032000100"
-    )
-    assert not any(msg.address == NATIVE_08A_ADDR for msg in sends)
-    assert not transport.control_enabled
-    assert not transport.control_long_active
-    assert transport.control_accel == 0.0
-
   def test_car_sets(self):
     assert len(ANGLE_CONTROL_CAR - TSS2_CAR) == 0
     assert len(RADAR_ACC_CAR - TSS2_CAR) == 0
 
   def test_lta_platforms(self):
-    assert ANGLE_CONTROL_CAR == {CAR.TOYOTA_RAV4_TSS2_2023, CAR.TOYOTA_COROLLA_TSS3}
+    # At this time, only RAV4 2023 is expected to use LTA/angle control
+    assert ANGLE_CONTROL_CAR == {CAR.TOYOTA_RAV4_TSS2_2023}
 
   @pytest.mark.parametrize("candidate", [CAR.TOYOTA_RAV4_TSS2, CAR.TOYOTA_RAV4_TSS2_2023])
   def test_rav4_can_filter_is_optional(self, candidate):
@@ -136,10 +106,7 @@ class TestToyotaInterfaces:
     if candidate in ANGLE_CONTROL_CAR:
       assert default_params.steerControlType == CarParams.SteerControlType.angle
       assert default_params.lateralTuning.which() == "pid"
-      if candidate == CAR.TOYOTA_COROLLA_TSS3:
-        assert default_params.safetyConfigs[0].safetyParam & ToyotaSafetyFlags.TSS3_COROLLA_SIGNER.value
-      else:
-        assert default_params.safetyConfigs[0].safetyParam & ToyotaSafetyFlags.LTA.value
+      assert default_params.safetyConfigs[0].safetyParam & ToyotaSafetyFlags.LTA.value
     else:
       assert default_params.steerControlType == CarParams.SteerControlType.torque
       assert default_params.lateralTuning.which() == "torque"
@@ -682,8 +649,6 @@ class TestToyotaInterfaces:
       with subtests.test(car_model=car_model.value):
         present_ecus = {ecu[0] for ecu in ecus}
         missing_ecus = common_ecus - present_ecus
-        if car_model == CAR.TOYOTA_COROLLA_TSS3:
-          missing_ecus -= {Ecu.fwdCamera}
         assert len(missing_ecus) == 0
 
         # Some exceptions for other common ECUs
@@ -698,24 +663,6 @@ class TestToyotaInterfaces:
 
 
 class TestToyotaFingerprint:
-  def test_corolla_tss3_reference_fw_exact_match(self):
-    reference_fw = {
-      (Ecu.engine, 0x700, None): b'\x018A2220212400\x00\x00\x00\x00',
-      (Ecu.abs, 0x7b0, None): b'\x01F152612A5400\x00\x00\x00\x00',
-      (Ecu.eps, 0x7a1, None): b'\x028965F1208000\x00\x00\x00\x008A3111213000\x00\x00\x00\x00',
-      (Ecu.fwdRadar, 0x750, 0xf): b'\x018821F7801200\x00\x00\x00\x00',
-    }
-    car_fw = [
-      CarParams.CarFw(ecu=ecu, address=address, subAddress=0 if sub_address is None else sub_address,
-                      fwVersion=version, brand="toyota")
-      for (ecu, address, sub_address), version in reference_fw.items()
-    ]
-
-    exact, matches = match_fw_to_car(car_fw, "", allow_fuzzy=False, log=False)
-
-    assert exact
-    assert matches == {CAR.TOYOTA_COROLLA_TSS3}
-
   def test_sienna_2025_route_fw_exact_match(self):
     route_fw = {
       (Ecu.engine, 0x700, None): b'\x01896630869000\x00\x00\x00\x00',
@@ -770,8 +717,6 @@ class TestToyotaFingerprint:
           if platform_code_ecu == Ecu.eps and car_model in (CAR.TOYOTA_PRIUS_V, CAR.LEXUS_CTH,):
             continue
           if platform_code_ecu == Ecu.abs and car_model in (CAR.TOYOTA_ALPHARD_TSS2,):
-            continue
-          if platform_code_ecu == Ecu.fwdCamera and car_model == CAR.TOYOTA_COROLLA_TSS3:
             continue
           assert platform_code_ecu in [e[0] for e in ecus]
 
@@ -853,32 +798,6 @@ class TestToyotaFingerprint:
 
 
 class TestToyotaCarController:
-  def test_corolla_tss3_angle_tracks_measurement_when_inactive_and_rate_limits_on_engage(self):
-    cp = CarInterface.get_non_essential_params(CAR.TOYOTA_COROLLA_TSS3)
-    controller = CarController(DBC[CAR.TOYOTA_COROLLA_TSS3], cp)
-    controller.tss3_request_transport.observe([], True)
-    cs = SimpleNamespace(out=structs.CarState(
-      steeringAngleDeg=17.0,
-      steeringAngleOffsetDeg=1.0,
-      steeringTorque=0.0,
-      vEgoRaw=5.0,
-      vCruise=70.0,
-    ))
-
-    inactive = structs.CarControl(enabled=False, latActive=False)
-    inactive.actuators.longControlState = structs.CarControl.Actuators.LongControlState.off
-    output, sends = controller.update(inactive.as_reader(), cs, 1_000_000_000, SimpleNamespace())
-    assert output.steeringAngleDeg == pytest.approx(18.0)
-    assert len([msg for msg in sends if msg.address == 0x777]) == 4
-    assert not any(msg.address == 0x08A for msg in sends)
-
-    active = structs.CarControl(enabled=True, latActive=True)
-    active.actuators.longControlState = structs.CarControl.Actuators.LongControlState.off
-    active.actuators.steeringAngleDeg = 30.0
-    output, sends = controller.update(active.as_reader(), cs, 1_010_000_000, SimpleNamespace())
-    assert output.steeringAngleDeg == pytest.approx(18.3)
-    assert len([msg for msg in sends if msg.address == 0x777]) == 4
-
   @pytest.mark.parametrize("driver_torque", [-191, -117, -99, 99, 117, 191])
   def test_toyota_assisting_driver_keeps_lateral_active(self, driver_torque):
     assert get_toyota_lat_active(True, driver_torque)

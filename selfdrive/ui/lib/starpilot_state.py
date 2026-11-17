@@ -9,7 +9,6 @@ from cereal import car, log, custom, messaging
 from opendbc.car.gm.values import GMFlags
 from opendbc.car.hyundai.values import HyundaiFlags
 from opendbc.car.toyota.values import TSS2_CAR
-from openpilot.selfdrive.ui.lib.fingerprint_persistence import should_persist_detected_fingerprint
 from openpilot.starpilot.common.lateral_delay import full_lateral_delay
 
 @dataclass
@@ -196,7 +195,7 @@ class StarPilotState:
             self.car_state.vEgoStarting = float(self._safe_get(CP, "vEgoStarting", self.car_state.vEgoStarting))
             self.car_state.vEgoStopping = float(self._safe_get(CP, "vEgoStopping", self.car_state.vEgoStopping))
 
-            if should_persist_detected_fingerprint(car_fingerprint) and (not force_fingerprint or PC):
+            if car_fingerprint and (not force_fingerprint or PC):
                 make_prefix = car_fingerprint.split("_", 1)[0]
                 cp_make = make_prefix if make_prefix in {"CUPRA", "GMC", "MAN", "SEAT"} else make_prefix.title()
                 user_make = self.params.get("CarMake")

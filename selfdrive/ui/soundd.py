@@ -16,7 +16,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.system import micd
 from openpilot.system.hardware import HARDWARE
 
-from openpilot.starpilot.common.starpilot_variables import ACTIVE_THEME_PATH, ERROR_LOGS_PATH, RANDOM_EVENTS_PATH, get_starpilot_toggles
+from openpilot.starpilot.common.starpilot_variables import ERROR_LOGS_PATH, RANDOM_EVENTS_PATH, get_starpilot_toggles
 from openpilot.starpilot.system.bluetooth.audio import BluetoothAudioSink
 
 SAMPLE_RATE = 48000
@@ -213,9 +213,8 @@ class Soundd:
       if standard_path.exists():
         sounds_path = standard_path
 
-    stock_path = Path(BASEDIR) / "selfdrive" / "assets" / "sounds" / filename
-    if filename == "startup.wav" and not stock_path.exists():
-      stock_path = stock_path.with_name("engage.wav")
+    stock_filename = "engage.wav" if filename == "startup.wav" else filename
+    stock_path = Path(BASEDIR) / "selfdrive" / "assets" / "sounds" / stock_filename
 
     candidates = []
     for path in (random_events_path, sounds_path, stock_path):
@@ -540,10 +539,7 @@ class Soundd:
       if sound not in self.volume_map:
         self.volume_map[sound] = 1.01
 
-    if self.starpilot_toggles.sound_pack != "stock":
-      self.sound_directory = ACTIVE_THEME_PATH / "sounds"
-    else:
-      self.sound_directory = Path(BASEDIR) / "selfdrive" / "assets" / "sounds"
+    self.sound_directory = Path(BASEDIR) / "selfdrive" / "assets" / "sounds"
 
     sound_source_signature = self.get_sound_source_signature()
     should_reload = self.starpilot_toggles.sound_pack != self.previous_sound_pack

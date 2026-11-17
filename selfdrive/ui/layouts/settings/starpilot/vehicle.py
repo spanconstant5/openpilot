@@ -44,8 +44,6 @@ from openpilot.selfdrive.ui.layouts.settings.starpilot.aethergrid import (
   with_alpha,
 )
 from openpilot.selfdrive.ui.lib.starpilot_state import starpilot_state
-from openpilot.selfdrive.ui.ui_state import ui_state
-from openpilot.selfdrive.ui.layouts.settings.tss3_signer import request_corolla_signer_install, signer_install_status
 from openpilot.selfdrive.ui.lib.fingerprint_catalog import (
   FingerprintModelOption,
   format_fingerprint_value,
@@ -135,15 +133,6 @@ class VehicleSettingsManagerView(PanelManagerView):
                    float(self._controller._params.get_int("LockDoorsTimer")),
                    f"{self._controller._params.get_int('LockDoorsTimer')}s"),
                  on_click=lambda: self._controller._on_select("LockDoorsTimer")))
-    if self._controller._is_corolla_tss3():
-      rows.append(SettingRow(
-        "CorollaRamSigner", "value", tr_noop("Corolla RAM Signer"),
-        subtitle=tr_noop("Install the volatile EPS signer after each full vehicle power cycle."),
-        get_value=signer_install_status,
-        on_click=lambda: self._controller._on_select("CorollaRamSigner"),
-        enabled=self._controller._can_install_corolla_signer,
-        disabled_label=tr_noop("Arm while the vehicle is fully OFF/not READY and in Park."),
-      ))
     return rows
 
   def _combo_value(self, keys: tuple[str, ...]) -> str:
@@ -667,13 +656,6 @@ class StarPilotVehicleSettingsLayout(_SettingsPage):
     idx = self._params.get_int(key)
     return tr(ACTION_NAME_BY_ID.get(idx, ACTION_NAMES[0]))
 
-  def _is_corolla_tss3(self) -> bool:
-    return self._params.get("CarModel", encoding="utf-8") == "TOYOTA_COROLLA_TSS3"
-
-  def _can_install_corolla_signer(self) -> bool:
-    return bool(self._is_corolla_tss3() and signer_install_status() in ("ARM", "RETRY", "KIT ERROR")
-                and not ui_state.engaged and not ui_state.started)
-
 
   def _on_toggle(self, param_key: str):
     if param_key == "DisableOpenpilotLongitudinal":
@@ -727,13 +709,6 @@ class StarPilotVehicleSettingsLayout(_SettingsPage):
     gui_app.push_widget(ConfirmDialog(prompt, tr("Flash"), callback=on_confirm))
 
   def _on_select(self, key: str):
-    if key == "CorollaRamSigner":
-      if not self._can_install_corolla_signer():
-        message = tr("Turn the vehicle fully OFF/not READY and keep it in Park before arming the RAM signer.")
-        gui_app.push_widget(alert_dialog(message))
-        return
-      request_corolla_signer_install()
-      return
     if key.startswith("combo:"):
       self._show_button_combo_dialog(key)
       return

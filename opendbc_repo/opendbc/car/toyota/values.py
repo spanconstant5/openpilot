@@ -57,11 +57,8 @@ class ToyotaSafetyFlags(IntFlag):
   LTA = (4 << 8)
   SECOC = (8 << 8)
   LONG_FILTER = (16 << 8)
-  TSS3_SIGNER = (16 << 8)
   GAS_INTERCEPTOR = (32 << 8)
   ALT_CRUISE = (64 << 8)
-  TSS3_08A_HOST = (64 << 8)
-  TSS3_COROLLA_SIGNER = (128 << 8)
 
 
 class ToyotaFlags(IntFlag):
@@ -85,8 +82,6 @@ class ToyotaFlags(IntFlag):
   RAISED_ACCEL_LIMIT = 1024
   SECOC = 2048
   AUTO_BRAKE_HOLD = 4096
-  # Toyota TSS 3.0 CAN FD layout. 8192 is already DSU_BYPASS.
-  CAN_FD = 16384
 
   # deprecated flags
   # these cars are speculated to allow stop and go when the DSU is unplugged
@@ -141,16 +136,6 @@ class ToyotaSecOCPlatformConfig(PlatformConfig):
 
     if self.flags & ToyotaFlags.RADAR_ACC:
       self.dbc_dict = {Bus.pt: 'toyota_secoc_pt_generated'}
-
-
-@dataclass
-class ToyotaCanFDSecOCPlatformConfig(PlatformConfig):
-  """TSS 3.0 CAN FD platform using the shared request/result DBC."""
-  dbc_dict: dict = field(default_factory=lambda: {Bus.pt: 'toyota_tss3_pt_generated'})
-
-  def init(self):
-    self.flags |= (ToyotaFlags.HYBRID | ToyotaFlags.TSS2 | ToyotaFlags.NO_DSU |
-                   ToyotaFlags.SECOC | ToyotaFlags.CAN_FD | ToyotaFlags.ANGLE_CONTROL)
 
 
 class CAR(Platforms):
@@ -241,13 +226,6 @@ class CAR(Platforms):
       ToyotaCarDocs("Lexus UX Hybrid 2019-24"),
     ],
     CarSpecs(mass=3060. * CV.LB_TO_KG, wheelbase=2.67, steerRatio=13.9, tireStiffnessFactor=0.444),
-  )
-  TOYOTA_COROLLA_TSS3 = ToyotaCanFDSecOCPlatformConfig(
-    [ToyotaCommunityCarDocs("Toyota Corolla Hybrid 2025 (TSS 3.0)", min_enable_speed=MIN_ACC_SPEED)],
-    # The 2023 US-built Corolla SE evidence and the 2025 Hybrid target are E210
-    # sedans with a 2.70 m wheelbase. The 13.9 ratio remains the best Corolla
-    # reference and still needs direct validation on the target car.
-    CarSpecs(mass=3060. * CV.LB_TO_KG, wheelbase=2.70, steerRatio=13.9, tireStiffnessFactor=0.444),
   )
   TOYOTA_HIGHLANDER = PlatformConfig(
     [
@@ -666,27 +644,5 @@ def uses_toyota_auto_hold_aeb(CP: CarParams) -> bool:
 
 # no resume button press required
 NO_STOP_TIMER_CAR = CAR.with_flags(ToyotaFlags.NO_STOP_TIMER)
-
-
-class TSS3LongMode:
-  OFF = 0
-  SHADOW = 1
-  LIVE = 2
-
-
-class TSS3LatMode:
-  OFF = 0
-  SHADOW = 1
-  LIVE = 2
-
-
-# These modes are evaluated only for the explicitly selected TSS3 platform.
-# The panda TSS3 safety flag supplies the independent tx/rx allowlist gate.
-TSS3_LONG_MODE = TSS3LongMode.LIVE
-TSS3_LAT_MODE = TSS3LatMode.LIVE
-TSS3_LAT_RELAY_ONLY = False
-TSS3_MAX_STEER_ANGLE = 55.0
-TSS3_MIN_OVERRIDE_SPEED = 0.45
-TSS3_STEER_DRIVER_TORQUE_THRESHOLD = 0.6
 
 DBC = CAR.create_dbc_map()
