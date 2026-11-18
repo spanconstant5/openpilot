@@ -5,7 +5,10 @@ This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
 from openpilot.selfdrive.ui.layouts.settings.device import DeviceLayout
+from openpilot.selfdrive.car.toyota_tss3_oracle_kit import oracle_ui_state
+from openpilot.selfdrive.ui.layouts.settings.tss3_oracle import Tss3OracleBringupDialog
 from openpilot.selfdrive.ui.onroad.cabin_camera_dialog import CabinCameraDialog
+from openpilot.selfdrive.ui.tss3_oracle_runner import tool_available
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.common.hardware import HARDWARE
 from openpilot.system.ui.lib.application import gui_app
@@ -41,6 +44,22 @@ class DeviceLayoutSP(DeviceLayout):
 
   def _initialize_items(self):
     DeviceLayout._initialize_items(self)
+
+    self._tss3_oracle_button = button_item_sp(
+      title=lambda: tr("TSS3 Oracle Bringup"),
+      button_text=lambda: tr(oracle_ui_state(
+        ui_state.CP.carFingerprint if ui_state.CP is not None else None,
+        is_release=False,
+        tool_available=tool_available(),
+      )[2]),
+      description=lambda: tr(
+        "Arm the RAM-only TSS3 signer while fully off and in Park, then start the vehicle normally. " +
+        "No EPS flash writes are performed."
+      ),
+      callback=self._on_tss3_oracle_bringup,
+      enabled=lambda: ui_state.is_offroad() and not ui_state.engaged,
+    )
+    self._tss3_oracle_separator = LineSeparator(height=10)
 
     # Using dual button with no right button for better alignment
     self._always_offroad_btn = dual_button_item_sp(
@@ -109,6 +128,8 @@ class DeviceLayoutSP(DeviceLayout):
     )
 
     items = [
+      self._tss3_oracle_button,
+      self._tss3_oracle_separator,
       text_item(lambda: tr("Dongle ID"), self._params.get("DongleId") or (lambda: tr("N/A"))),
       LineSeparator(),
       text_item(lambda: tr("Serial"), self._params.get("HardwareSerial") or (lambda: tr("N/A"))),
@@ -135,6 +156,11 @@ class DeviceLayoutSP(DeviceLayout):
 
   def _offroad_transition(self):
     self._power_buttons.action_item.right_button.set_visible(ui_state.is_offroad())
+
+  @staticmethod
+  def _on_tss3_oracle_bringup():
+    if ui_state.is_offroad():
+      gui_app.push_widget(Tss3OracleBringupDialog())
 
   @staticmethod
   def wake_mode_description() -> str:
@@ -188,6 +214,14 @@ class DeviceLayoutSP(DeviceLayout):
 
   def _update_state(self):
     super()._update_state()
+
+    fingerprint = ui_state.CP.carFingerprint if ui_state.CP is not None else None
+    oracle_visible, tss3, _ = oracle_ui_state(fingerprint, is_release=False, tool_available=tool_available())
+    self._tss3_oracle_button.set_visible(oracle_visible)
+    self._tss3_oracle_separator.set_visible(oracle_visible)
+    # Leave the page reachable for a recognized TSS3 car even when the kit is
+    # missing so it can report the exact compatibility/installation failure.
+    self._tss3_oracle_button.action_item.set_enabled(lambda: tss3 and ui_state.is_offroad() and not ui_state.engaged)
 
     # Handle Always Offroad button
     always_offroad = ui_state.params.get_bool("OffroadMode")
