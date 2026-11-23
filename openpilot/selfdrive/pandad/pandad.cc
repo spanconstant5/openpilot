@@ -352,14 +352,6 @@ private:
 };
 }  // namespace
 
-bool check_connected(Panda *panda) {
-  if (!panda->connected()) {
-    do_exit = true;
-    return false;
-  }
-  return true;
-}
-
 Panda *connect(std::string serial) {
   std::unique_ptr<Panda> panda;
   try {
@@ -691,7 +683,7 @@ bool pandad_run(Panda *panda) {
   bool oracle_handoff = false;
 
   // Main loop: receive CAN first, then process lower priority panda and peripheral state.
-  while (!do_exit && check_connected(panda)) {
+  while (!do_exit) {
     tss3_startup_catcher.update(panda);
     can_recv(panda, &pm, &tss3_startup_catcher);
     if (tss3_startup_catcher.caught()) {
@@ -743,9 +735,7 @@ bool pandad_run(Panda *panda) {
 
   // Close relay on exit to prevent a fault
   if (!oracle_handoff && is_onroad && !engaged) {
-    if (panda->connected()) {
-      panda->set_safety_model(cereal::CarParams::SafetyModel::NO_OUTPUT);
-    }
+    panda->set_safety_model(cereal::CarParams::SafetyModel::NO_OUTPUT);
   }
 
   send_thread.join();
