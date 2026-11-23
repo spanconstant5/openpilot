@@ -1,5 +1,12 @@
 # 2025 Corolla Hybrid — StarPilot TSS 3.0 port
 
+> [!IMPORTANT]
+> This `spangpt` branch is retained as the repository's historical default and
+> is **not** the recommended install. Start with the
+> [project and build index](docs/GITHUB_PORTFOLIO.md): it identifies the active
+> `sun`, `op`, `star`, and `frog` branches, their validation state, exact
+> upstream status, install links, research repositories, and recovery tags.
+
 [![Corolla TSS3 checks](https://github.com/spanconstant5/openpilot/actions/workflows/corolla-tss3-ci.yml/badge.svg?branch=spangpt)](https://github.com/spanconstant5/openpilot/actions/workflows/corolla-tss3-ci.yml)
 
 This repository is a StarPilot-based openpilot build for one target: the
