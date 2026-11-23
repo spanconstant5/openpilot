@@ -106,6 +106,9 @@ def uploader_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
 def tss3_oracle_auto(started: bool, params: Params, CP: car.CarParams) -> bool:
   return params.get_bool("Tss3OracleAutoArm")
 
+def toyota_speed_sign_logging(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return started and CP.brand == "toyota"
+
 def or_(*fns):
   return lambda *args: operator.or_(*(fn(*args) for fn in fns))
 
@@ -187,6 +190,7 @@ procs += [
   # mapd
   NativeProcess("mapd", Paths.mapd_root(), ["bash", "-c", f"{MAPD_PATH} > /dev/null 2>&1"], mapd_ready),
   PythonProcess("mapd_manager", "openpilot.sunnypilot.mapd.mapd_manager", always_run),
+  PythonProcess("speed_sign_logger", "openpilot.sunnypilot.mapd.speed_sign_logger", toyota_speed_sign_logging),
 
   # locationd
   NativeProcess("locationd_llk", "openpilot/sunnypilot/selfdrive/locationd", ["./locationd"], only_onroad),
