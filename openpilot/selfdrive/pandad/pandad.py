@@ -20,10 +20,37 @@ DEFAULT_FIRMWARE_CHOICE = FirmwareChoice()
 PACKET_VERSIONS = (Panda.HEALTH_PACKET_VERSION, Panda.CAN_PACKET_VERSION)
 REGISTER_DIVERGENT = 1 << 18
 
+# Cooperative Panda handoff for the short-lived TSS3 RAM-signer installer.
+# SIGWINCH is ignored by old wrappers, so a mismatched installer fails closed.
+DIRECT_PANDA_LEASE_SIGNAL = signal.SIGWINCH
+DIRECT_PANDA_LEASE_PATH = Path("/tmp/openpilot-pandad-direct-lease")
+DIRECT_PANDA_LEASE_READY_PATH = Path("/tmp/openpilot-pandad-direct-ready")
+
+
+def _active_direct_panda_lease() -> str | None:
+  try:
+    lease = DIRECT_PANDA_LEASE_PATH.read_text(encoding="utf-8").strip()
+    pid_text, token = lease.split(" ", 1)
+    if not token:
+      raise ValueError("empty direct-Panda lease token")
+    os.kill(int(pid_text), 0)
+    return lease
+  except (FileNotFoundError, ProcessLookupError, PermissionError, ValueError):
+    DIRECT_PANDA_LEASE_PATH.unlink(missing_ok=True)
+    DIRECT_PANDA_LEASE_READY_PATH.unlink(missing_ok=True)
+    return None
+
+
+def _publish_direct_panda_lease_ready(lease: str) -> None:
+  tmp = DIRECT_PANDA_LEASE_READY_PATH.with_name(f".{DIRECT_PANDA_LEASE_READY_PATH.name}.{os.getpid()}")
+  tmp.write_text(lease + "\n", encoding="utf-8")
+  os.replace(tmp, DIRECT_PANDA_LEASE_READY_PATH)
+
 
 def get_expected_signature(mcu_type: McuType, choice: FirmwareChoice = DEFAULT_FIRMWARE_CHOICE) -> bytes:
   fn = firmware_path(FW_PATH, mcu_type.config.app_fn, choice)
   return Panda.get_signature_from_firmware(fn)
+
 
 def recover_internal_bootstub(panda: Panda, panda_serial: str, fw_path: str) -> None:
   dfu_serial = panda.get_dfu_serial()
@@ -157,6 +184,8 @@ def wait_for_internal_panda(timeout: int = 15) -> bool:
 
 
 def main() -> None:
+  direct_lease_requested = False
+
   # signal pandad to close the relay and exit
   def signal_handler(signum, frame):
     cloudlog.info(f"Caught signal {signum}, exiting")
@@ -165,9 +194,36 @@ def main() -> None:
     if process is not None:
       process.send_signal(signal.SIGINT)
 
+  def direct_lease_signal_handler(signum, frame):
+    nonlocal direct_lease_requested
+    lease = _active_direct_panda_lease()
+    if lease is None:
+      cloudlog.warning("Ignoring direct-Panda lease signal without a live lease")
+      return
+    direct_lease_requested = True
+    cloudlog.info(f"Direct-Panda lease requested: {lease}")
+    if process is not None and process.poll() is None:
+      process.send_signal(signal.SIGINT)
+
+  def hold_direct_panda_lease(lease: str) -> None:
+    cloudlog.info(f"Direct-Panda lease ready: {lease}")
+    _publish_direct_panda_lease_ready(lease)
+    try:
+      while not do_exit and _active_direct_panda_lease() == lease:
+        time.sleep(0.05)
+    finally:
+      try:
+        if DIRECT_PANDA_LEASE_READY_PATH.read_text(encoding="utf-8").strip() == lease:
+          DIRECT_PANDA_LEASE_READY_PATH.unlink(missing_ok=True)
+      except FileNotFoundError:
+        pass
+    cloudlog.info(f"Direct-Panda lease released: {lease}")
+
   process = None
   do_exit = False
   signal.signal(signal.SIGINT, signal_handler)
+  signal.signal(signal.SIGTERM, signal_handler)
+  signal.signal(DIRECT_PANDA_LEASE_SIGNAL, direct_lease_signal_handler)
 
   # check health for lost heartbeat
   try:
@@ -185,6 +241,13 @@ def main() -> None:
   legacy_migration_attempted = False
   bootstub_repairs: set[str] = set()
   while not do_exit:
+    lease = _active_direct_panda_lease()
+    if direct_lease_requested or lease is not None:
+      direct_lease_requested = False
+      if lease is not None:
+        hold_direct_panda_lease(lease)
+      continue
+
     try:
       cloudlog.event("pandad.flash_and_connect", count=count)
       if (count % 2) == 0:

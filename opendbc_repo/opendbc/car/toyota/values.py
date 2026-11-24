@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum, IntFlag
 
 from opendbc.car import Bus, CarSpecs, PlatformConfig, Platforms
-from opendbc.car.lateral import AngleSteeringLimits
+from opendbc.car.lateral import AngleSteeringLimits, AngleSteeringLimitsVM
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.structs import CarParams
 from opendbc.car.docs_definitions import CarFootnote, CarDocs, Column, CarParts, CarHarness, SupportType
@@ -19,6 +19,7 @@ class CarControllerParams:
   STEER_STEP = 1
   STEER_MAX = 1500
   STEER_ERROR_MAX = 350     # max delta between torque cmd and torque motor
+  TSS3_TARGET_ANGLE_SCALE_DEG = 1024 / 17870
 
   # Lane Tracing Assist (LTA) control limits
   ANGLE_LIMITS: AngleSteeringLimits = AngleSteeringLimits(
@@ -33,9 +34,22 @@ class CarControllerParams:
     ([5, 25], [0.36, 0.26]),
   )
 
+  # Corolla TSS3 EPS hard limits: +/-1745 raw and 78 raw per sequence.
+  # Use half the rate allowance at 100 Hz to retain the same 2x safety margin
+  # as the proven sunnypilot implementation.
+  TSS3_ANGLE_LIMITS: AngleSteeringLimitsVM = AngleSteeringLimitsVM(
+    1745 * TSS3_TARGET_ANGLE_SCALE_DEG,
+    MAX_LATERAL_ACCEL=3.5886,
+    MAX_LATERAL_JERK=3.5886,
+    MAX_ANGLE_RATE=39 * TSS3_TARGET_ANGLE_SCALE_DEG,
+  )
+
   MAX_LTA_DRIVER_TORQUE_ALLOWANCE = 150  # slightly above steering pressed allows some resistance when changing lanes
 
   def __init__(self, CP):
+    if CP.flags & ToyotaFlags.TSS3:
+      self.ANGLE_LIMITS = self.TSS3_ANGLE_LIMITS
+
     if CP.flags & (ToyotaFlags.RAISED_ACCEL_LIMIT | ToyotaFlags.GAS_INTERCEPTOR):
       self.ACCEL_MAX = 2.0
     else:
@@ -61,6 +75,12 @@ class ToyotaSafetyFlags(IntFlag):
   GAS_INTERCEPTOR = (32 << 8)
   ALT_CRUISE = (64 << 8)  # Exact Lexus IS DSU MAIN profile
   RAV4H_FILTER_PROFILE = (128 << 8)  # Exact smartDSU owner; bit14 remains reserved for ALT_CRUISE
+  # UInt16 safetyParam has no unused high-byte bits in StarPilot. Requiring
+  # LONG_FILTER|ALT_CRUISE together creates a unique TSS3 signature, while the
+  # gas-interceptor bit is reused only as the Corolla bus-2 selector once TSS3
+  # has already matched.
+  TSS3 = ((16 | 64) << 8)
+  TSS3_RX_BUS_2 = (32 << 8)
 
 
 class ToyotaFlags(IntFlag):
@@ -71,6 +91,7 @@ class ToyotaFlags(IntFlag):
   ARS510_RADAR = 16384
   ARS510_FUSED = 32768
   DISABLE_RADAR = 4
+  TSS3 = 1 << 21
 
   # Static flags
   TSS2 = 8
@@ -144,6 +165,21 @@ class ToyotaSecOCPlatformConfig(PlatformConfig):
 
     if self.flags & ToyotaFlags.RADAR_ACC:
       self.dbc_dict = {Bus.pt: 'toyota_secoc_pt_generated'}
+
+
+@dataclass
+class ToyotaTSS3CarDocs(ToyotaCarDocs):
+  support_type: SupportType = SupportType.CUSTOM
+  support_link: str | None = None
+  car_parts: CarParts = field(default_factory=CarParts.common([CarHarness.toyota_b]))
+
+
+@dataclass
+class ToyotaTSS3PlatformConfig(PlatformConfig):
+  dbc_dict: dict = field(default_factory=lambda: dbc_dict('toyota_tss3_pt_generated', 'toyota_tss3_radar_generated'))
+
+  def init(self):
+    self.flags |= ToyotaFlags.TSS3
 
 
 class CAR(Platforms):
@@ -235,6 +271,11 @@ class CAR(Platforms):
       ToyotaCarDocs("Lexus UX Hybrid 2019-24"),
     ],
     CarSpecs(mass=3060. * CV.LB_TO_KG, wheelbase=2.67, steerRatio=13.9, tireStiffnessFactor=0.444),
+  )
+  TOYOTA_COROLLA_TSS3 = ToyotaTSS3PlatformConfig(
+    [ToyotaTSS3CarDocs("Toyota Corolla Hybrid 2025")],
+    CarSpecs(mass=3060. * CV.LB_TO_KG, wheelbase=2.70, steerRatio=13.9, tireStiffnessFactor=0.444),
+    flags=ToyotaFlags.HYBRID,
   )
   TOYOTA_HIGHLANDER = PlatformConfig(
     [
@@ -582,6 +623,13 @@ FW_QUERY_CONFIG = FwQueryConfig(
                       Ecu.hybrid, Ecu.srs, Ecu.transmission, Ecu.hvac],
       bus=0,
     ),
+    Request(
+      [StdQueries.TESTER_PRESENT_REQUEST, StdQueries.DEFAULT_DIAGNOSTIC_REQUEST, StdQueries.EXTENDED_DIAGNOSTIC_REQUEST, StdQueries.UDS_VERSION_REQUEST],
+      [StdQueries.TESTER_PRESENT_RESPONSE, StdQueries.DEFAULT_DIAGNOSTIC_RESPONSE, StdQueries.EXTENDED_DIAGNOSTIC_RESPONSE, StdQueries.UDS_VERSION_RESPONSE],
+      whitelist_ecus=[Ecu.eps, Ecu.abs],
+      bus=1,
+      obd_multiplexing=False,
+    ),
   ],
   non_essential_ecus={
     # FIXME: On some models, abs can sometimes be missing
@@ -623,6 +671,7 @@ FW_QUERY_CONFIG = FwQueryConfig(
 )
 
 STEER_THRESHOLD = 100
+TSS3_STEER_DRIVER_TORQUE_THRESHOLD = 0.6
 
 # These cars have non-standard EPS torque scale factors. All others are 73
 EPS_SCALE = defaultdict(lambda: 73,

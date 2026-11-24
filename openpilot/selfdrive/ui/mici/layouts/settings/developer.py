@@ -12,6 +12,9 @@ from openpilot.starpilot.car.hyundai.aol import ioniq6_alpha_long_available
 from openpilot.starpilot.car.ford.longitudinal_preferences import release_long_available as ford_release_long_available
 from opendbc.car.volkswagen.meb_modes import MEB_CARS, settings_capable as meb_settings_capable
 from openpilot.starpilot.car.volkswagen.preferences import stock_long_requested
+from openpilot.selfdrive.car.toyota_tss3_oracle_kit import oracle_ui_state
+from openpilot.selfdrive.ui.mici.layouts.settings.tss3_oracle import Tss3OracleBringupPage
+from openpilot.selfdrive.ui.tss3_oracle_runner import tool_available
 from openpilot.selfdrive.ui.widgets.ssh_key import SshKeyFetcher
 
 
@@ -113,6 +116,11 @@ class DeveloperLayoutMici(NavScroller):
                                         toggle_callback=self._on_alpha_long_enabled,
                                         description="Use alpha openpilot longitudinal control instead of stock ACC. This may disable Automatic Emergency " +
                                                     "Braking (AEB).")
+    self._tss3_oracle_button = BigButton(
+      "TSS3 signer bringup", "checking vehicle",
+      description="Load the volatile 2025 Corolla TSS3 RAM signer without writing EPS flash.",
+    )
+    self._tss3_oracle_button.set_click_callback(self._on_tss3_oracle_bringup)
     self._always_hold_toggle = BigToggle(HOLD_LABEL, initial_state=ui_state.params.get_bool(HOLD_KEY),
                                            toggle_callback=self._on_always_hold, description=HOLD_DESCRIPTION)
     self._navigation_toggle = BigParamControl("navigation (alpha)", "NavigationEnabled",
@@ -125,6 +133,7 @@ class DeveloperLayoutMici(NavScroller):
                                                             "SIM is untouched. Remote access over cellular data is unavailable while this is enabled.")
 
     self._scroller.add_widgets([
+      self._tss3_oracle_button,
       self._adb_toggle,
       self._ssh_toggle,
       self._ssh_keys_btn,
@@ -191,6 +200,16 @@ class DeveloperLayoutMici(NavScroller):
     else:
       self._alpha_long_toggle.set_visible(False)
 
+    fingerprint = ui_state.CP.carFingerprint if ui_state.CP is not None else None
+    _, tss3, oracle_label = oracle_ui_state(
+      fingerprint, is_release=False, tool_available=tool_available(),
+    )
+    self._tss3_oracle_button.set_visible(True)
+    self._tss3_oracle_button.set_enabled(
+      lambda: tss3 and tool_available() and ui_state.is_offroad() and not ui_state.engaged
+    )
+    self._tss3_oracle_button.set_value(oracle_label)
+
     # Refresh toggles from params to mirror external changes
     for key, item in self._refresh_toggles:
       value = (not stock_long_requested(ui_state.params) if key == "AlphaLongitudinalEnabled" and meb_settings_capable(ui_state.CP)
@@ -201,6 +220,10 @@ class DeveloperLayoutMici(NavScroller):
     if ui_state.is_offroad():
       ui_state.params.put_bool(HOLD_KEY, state, block=True)
     self._always_hold_toggle.set_checked(ui_state.params.get_bool(HOLD_KEY))
+
+  def _on_tss3_oracle_bringup(self):
+    if ui_state.is_offroad():
+      gui_app.push_widget(Tss3OracleBringupPage())
 
   def _on_joystick_debug_mode(self, state: bool):
     ui_state.params.put_bool("JoystickDebugMode", state, block=True)

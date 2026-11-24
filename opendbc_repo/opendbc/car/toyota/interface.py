@@ -5,6 +5,7 @@ from opendbc.car.toyota.carcontroller import CarController
 from opendbc.car.toyota.radar_interface import RadarInterface
 from opendbc.car.toyota.values import Ecu, CAR, DBC, ToyotaFlags, CarControllerParams, MIN_ACC_SPEED, \
                                                   EPS_SCALE, ToyotaSafetyFlags, TOYOTA_AUTO_HOLD_CARS, uses_toyota_auto_hold_aeb
+from opendbc.car.toyota.tss3 import TSS3_CHASSIS_BUS
 from opendbc.car.disable_ecu import disable_ecu
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
@@ -72,9 +73,17 @@ class CarInterface(CarInterfaceBase):
       ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.SECOC.value
       ret.dashcamOnly = is_release
 
-    if ret.flags & ToyotaFlags.ANGLE_CONTROL:
+    if ret.flags & ToyotaFlags.TSS3:
+      ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.TSS3.value
+      if candidate == CAR.TOYOTA_COROLLA_TSS3:
+        ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.TSS3_RX_BUS_2.value
+      ret.dashcamOnly = is_release
+      ret.steerAtStandstill = True
+
+    if ret.flags & (ToyotaFlags.ANGLE_CONTROL | ToyotaFlags.TSS3):
       ret.steerControlType = SteerControlType.angle
-      ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.LTA.value
+      if ret.flags & ToyotaFlags.ANGLE_CONTROL:
+        ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.LTA.value
 
       # LTA control can be more delayed and winds up more often
       ret.steerActuatorDelay = 0.18
@@ -93,12 +102,14 @@ class CarInterface(CarInterfaceBase):
                      for fw in car_fw))
     if candidate in (CAR.TOYOTA_PRIUS, CAR.TOYOTA_PRIUS_RETROFIT) and fingerprint.get(0, {}).get(0x23) == 8:
       ret.flags |= int(ToyotaFlags.ZSS)
-    stop_and_go = bool(ret.flags & ToyotaFlags.TSS2)
+    stop_and_go = bool(ret.flags & (ToyotaFlags.TSS2 | ToyotaFlags.TSS3))
 
     # In TSS2 cars, the camera does long control
     found_ecus = [fw.ecu for fw in car_fw]
 
-    if Ecu.hybrid in found_ecus:
+    if Ecu.hybrid in found_ecus or (candidate == CAR.TOYOTA_COROLLA_TSS3 and
+                                   (Ecu.electricBrakeBooster in found_ecus or
+                                    0x127 in fingerprint.get(TSS3_CHASSIS_BUS, {}))):
       ret.flags |= ToyotaFlags.HYBRID.value
 
     if candidate in (CAR.TOYOTA_PRIUS, CAR.TOYOTA_PRIUS_RETROFIT):
@@ -153,13 +164,17 @@ class CarInterface(CarInterfaceBase):
       if alpha_long and not radar_filter:
         ret.flags |= ToyotaFlags.DISABLE_RADAR.value
 
+    if ret.flags & ToyotaFlags.TSS3:
+      ret.alphaLongitudinalAvailable = True
+
     # openpilot longitudinal enabled by default:
     #  - TSS2 cars with camera sending ACC_CONTROL where we can block it
     # openpilot longitudinal behind alpha long toggle:
     #  - TSS2 radar ACC cars (disables radar)
 
     ret.openpilotLongitudinalControl = ((bool(ret.flags & ToyotaFlags.TSS2) and not (ret.flags & ToyotaFlags.RADAR_ACC)) or
-                                        bool(ret.flags & ToyotaFlags.DISABLE_RADAR.value) or (radar_filter and alpha_long))
+                                        bool(ret.flags & ToyotaFlags.DISABLE_RADAR.value) or (radar_filter and alpha_long) or
+                                        (bool(ret.flags & ToyotaFlags.TSS3) and alpha_long))
 
     if candidate == CAR.TOYOTA_YARIS and ret.flags & ToyotaFlags.DISABLE_RADAR:
       ret.safetyConfigs[0].safetyParam |= int(ToyotaSafetyFlags.SECOC_RADAR_LONG)
@@ -236,6 +251,8 @@ class CarInterface(CarInterfaceBase):
 
     if radar_filter and not ret.flags & ToyotaFlags.TSS2:
       ret.autoResumeSng = False  # Preserve the pre-TSS2 stock stop timer.
+    if ret.flags & ToyotaFlags.TSS3:
+      ret.autoResumeSng = ret.openpilotLongitudinalControl
 
     if not ret.openpilotLongitudinalControl:
       ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.STOCK_LONGITUDINAL.value
@@ -245,7 +262,8 @@ class CarInterface(CarInterfaceBase):
     highlander_sdsu = candidate == CAR.TOYOTA_HIGHLANDER and (rav4h_sdsu or legacy_advert)
     ret.minEnableSpeed = -1. if stop_and_go or highlander_sdsu else MIN_ACC_SPEED
 
-    if ret.flags & ToyotaFlags.TSS2 or ret.flags & ToyotaFlags.LONG_FILTER and not (rav4h_sdsu or eps8_filter or legacy_filter):
+    if ret.flags & (ToyotaFlags.TSS2 | ToyotaFlags.TSS3) or \
+       ret.flags & ToyotaFlags.LONG_FILTER and not (rav4h_sdsu or eps8_filter or legacy_filter):
       ret.flags |= ToyotaFlags.RAISED_ACCEL_LIMIT.value
 
       # Hybrids have much quicker longitudinal actuator response

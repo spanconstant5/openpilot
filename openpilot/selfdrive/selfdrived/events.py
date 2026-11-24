@@ -756,6 +756,12 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.NO_ENTRY: NoEntryAlert("Car Not Ready"),
   },
 
+  EventName.signerUnavailable: {
+    ET.IMMEDIATE_DISABLE: ImmediateDisableAlert("Signer Unavailable"),
+    ET.PERMANENT: NormalPermanentAlert("openpilot Unavailable", "Signer Unavailable"),
+    ET.NO_ENTRY: NoEntryAlert("Signer Unavailable"),
+  },
+
   EventName.wrongCruiseMode: {
     ET.USER_DISABLE: EngagementAlert(AudibleAlert.disengage),
     ET.NO_ENTRY: NoEntryAlert("Adaptive Cruise Disabled"),

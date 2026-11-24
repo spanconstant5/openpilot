@@ -149,6 +149,8 @@ class CarEvents:
       events.add(EventName.accFaulted)
     if CS.carNotReady:
       events.add(EventName.carNotReady)
+    if CS.signerUnavailable:
+      events.add(EventName.signerUnavailable)
     if CS.steeringPressed:
       events.add(EventName.steerOverride)
     if CS.steeringDisengage and not CS_prev.steeringDisengage:

@@ -2,7 +2,8 @@ import math
 import numpy as np
 from opendbc.car import ACCEL_MAX_TAKEOFF
 from opendbc.car import Bus, make_tester_present_msg, rate_limit, structs, ACCELERATION_DUE_TO_GRAVITY, DT_CTRL
-from opendbc.car.lateral import apply_meas_steer_torque_limits, apply_std_steer_angle_limits, common_fault_avoidance
+from opendbc.car.lateral import apply_meas_steer_torque_limits, apply_std_steer_angle_limits, apply_steer_angle_limits_vm, common_fault_avoidance
+from opendbc.car.can_definitions import CanData
 from opendbc.car.carlog import carlog
 from opendbc.car.common.filter_simple import FirstOrderFilter, HighPassFilter
 from opendbc.car.common.pid import PIDController
@@ -16,6 +17,8 @@ from opendbc.car.toyota.door_locks import DoorLocks
 from opendbc.car.toyota.values import CAR, CarControllerParams, ToyotaFlags, TOYOTA_AUTO_HOLD_CARS, uses_toyota_auto_hold_aeb
 from opendbc.can import CANPacker
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
+from opendbc.car.toyota.tss3 import TSS3_CHASSIS_BUS, TSS3_SOURCE_BUS, SignerTransport
+from opendbc.car.vehicle_model import VehicleModel
 
 Ecu = structs.CarParams.Ecu
 LongCtrlState = structs.CarControl.Actuators.LongControlState
@@ -109,6 +112,12 @@ class CarController(CarControllerBase):
 
     self.packer = CANPacker(dbc_names[Bus.pt])
 
+    if self.CP.flags & ToyotaFlags.TSS3:
+      control_bus = TSS3_SOURCE_BUS if self.CP.carFingerprint == CAR.TOYOTA_COROLLA_TSS3 else TSS3_CHASSIS_BUS
+      self.signer = SignerTransport(self.packer, stock_longitudinal=not self.CP.openpilotLongitudinalControl,
+                                    signer_bus=control_bus, publication_bus=control_bus)
+      self.VM = VehicleModel(self.CP)
+
     self.secoc_lka_message_counter = 0
     self.secoc_lta_message_counter = 0
     self.secoc_acc_message_counter = 0
@@ -145,6 +154,9 @@ class CarController(CarControllerBase):
     self.brake_hold_active = False
 
   def update(self, CC, CS, now_nanos):
+    if self.CP.flags & ToyotaFlags.TSS3:
+      return self.update_tss3(CC, CS, now_nanos)
+
     from opendbc.car.toyota import dsu_bypass
     bypass_long = dsu_bypass.enabled(self.CP)
     _projection = self.learning_projection_observer
@@ -531,4 +543,43 @@ class CarController(CarControllerBase):
     self.frame += 1
     if _projection is not None:
       _projection.finish(new_actuators.torque)
+    return new_actuators, can_sends
+
+  def update_tss3(self, CC, CS, now_nanos):
+    actuators = CC.actuators
+    hud_control = CC.hudControl
+    enabled = CC.enabled and not CS.tss3_stock_pcs
+    can_sends = self.signer.receive(CS, enabled, now_nanos)
+
+    measured_angle = CS.out.steeringAngleDeg + CS.out.steeringAngleOffsetDeg
+    lat_active = CC.latActive and abs(measured_angle) < self.params.ANGLE_LIMITS.STEER_ANGLE_MAX
+    if not CC.enabled or self.signer.request_due(CS, enabled, now_nanos):
+      if self.signer.angle_reference_reset(now_nanos):
+        self.last_angle = measured_angle
+      self.last_angle = apply_steer_angle_limits_vm(
+        actuators.steeringAngleDeg + CS.out.steeringAngleOffsetDeg,
+        self.last_angle, CS.out.vEgoRaw, measured_angle, lat_active, self.params, self.VM,
+      )
+
+    long_active = self.CP.openpilotLongitudinalControl and CC.longActive
+    self.accel = float(np.clip(actuators.accel, self.params.ACCEL_MIN, self.params.ACCEL_MAX)) if long_active else 0.0
+
+    can_sends.extend(self.signer.send(CS, enabled, lat_active, self.last_angle, long_active, self.accel, now_nanos))
+    if not CC.enabled and self.frame % 100 == 0:
+      can_sends.extend(self.signer.probe(CS, self.last_angle, now_nanos))
+    CS.tss3_signer_available = self.signer.available
+
+    if CC.cruiseControl.cancel:
+      can_sends.append(toyotacan.create_tss3_brake_cancel_command(self.packer, CS.tss3_brake_module, TSS3_SOURCE_BUS))
+
+    steer_alert = hud_control.visualAlert in (VisualAlert.steerRequired, VisualAlert.ldw)
+    send_ui = steer_alert != self.alert_active
+    self.alert_active = steer_alert
+    if CS.tss3_lkas_hud and (self.frame % 20 == 0 or send_ui):
+      can_sends.append(toyotacan.create_tss3_lkas_hud(self.packer, TSS3_CHASSIS_BUS, CS.tss3_lkas_hud, steer_alert))
+
+    new_actuators = actuators.as_builder()
+    new_actuators.steeringAngleDeg = self.last_angle
+    new_actuators.accel = self.accel
+    self.frame += 1
     return new_actuators, can_sends

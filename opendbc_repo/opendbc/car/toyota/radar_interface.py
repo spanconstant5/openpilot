@@ -7,6 +7,11 @@ from opendbc.car.toyota.ars510_acc_target import RadarInterface as Ars510AccRada
 from opendbc.car.toyota.ars510_radar import RadarInterface as Ars510FusedRadarInterface
 from opendbc.car.interfaces import RadarInterfaceBase
 
+TSS3_GEOMETRY_MSGS = [0x180, 0x181, 0x182]
+TSS3_MOTION_MSGS = [0x183, 0x184, 0x185]
+TSS3_SLOTS = 8
+TSS3_DIST_INVALID = 0xFFF8 * 0.005
+
 
 def _create_radar_can_parser(CP):
   if CP.flags & ToyotaFlags.TSS2:
@@ -25,16 +30,27 @@ def _create_radar_can_parser(CP):
   return CANParser(DBC[CP.carFingerprint][Bus.radar], messages, 1)
 
 
+def _create_tss3_radar_can_parser(CP):
+  messages = [(msg, 20) for msg in TSS3_GEOMETRY_MSGS + TSS3_MOTION_MSGS]
+  return CANParser(DBC[CP.carFingerprint][Bus.radar], messages, 1)
+
+
 class RadarInterface(RadarInterfaceBase):
   def __init__(self, CP):
     super().__init__(CP)
     self.cluster = None
+    self.ars510 = None
     if CP.carFingerprint == CAR.TOYOTA_CAMRY and not CP.radarUnavailable:
       from opendbc.car.toyota.cluster_radar import ClusterRadarInterface
       self.cluster = ClusterRadarInterface(CP)
       self.rcp = None
       return
-    self.ars510 = None
+    self.tss3 = bool(CP.flags & ToyotaFlags.TSS3)
+    if self.tss3:
+      self.rcp = None if CP.radarUnavailable else _create_tss3_radar_can_parser(CP)
+      self.trigger_msg = TSS3_MOTION_MSGS[-1]
+      self.updated_messages = set()
+      return
     if CP.carFingerprint in ARS510_RADAR_CAR and CP.flags & ToyotaFlags.ARS510_RADAR and not CP.radarUnavailable:
       parser = Ars510FusedRadarInterface if CP.flags & ToyotaFlags.ARS510_FUSED else Ars510AccRadarInterface
       self.ars510 = parser(CP)
@@ -73,6 +89,9 @@ class RadarInterface(RadarInterfaceBase):
     return rr
 
   def _update(self, updated_messages):
+    if self.tss3:
+      return self._update_tss3(updated_messages)
+
     ret = RadarData()
     if not self.rcp.can_valid:
       ret.errors.canError = True
@@ -111,6 +130,39 @@ class RadarInterface(RadarInterfaceBase):
         else:
           if ii in self.pts:
             del self.pts[ii]
+
+    ret.points = list(self.pts.values())
+    return ret
+
+  def _update_tss3(self, updated_messages):
+    ret = RadarData()
+    if not self.rcp.can_valid:
+      ret.errors.canError = True
+      self.pts.clear()
+      return ret
+
+    for bank, (geometry_addr, motion_addr) in enumerate(zip(TSS3_GEOMETRY_MSGS, TSS3_MOTION_MSGS, strict=True)):
+      if motion_addr not in updated_messages:
+        continue
+      geometry, motion = self.rcp.vl[geometry_addr], self.rcp.vl[motion_addr]
+      for slot in range(TSS3_SLOTS):
+        key = bank * TSS3_SLOTS + slot
+        new, ended = motion[f"NEW_TRACK_{slot}"], motion[f"TRACK_ENDED_{slot}"]
+        dist = geometry[f"DIST_{slot}"]
+        valid = motion[f"TRACK_STATE_{slot}"] != 0 and 0 < dist < TSS3_DIST_INVALID and (new or not ended)
+
+        if new or ended or not valid:
+          self.pts.pop(key, None)
+        if not valid or geometry_addr not in updated_messages:
+          continue
+
+        if key not in self.pts:
+          self.pts[key] = RadarData.RadarPoint()
+          self.pts[key].trackId = self.track_id
+          self.track_id += 1
+        self.pts[key].dRel = dist
+        self.pts[key].yRel = geometry[f"LAT_{slot}"]
+        self.pts[key].vRel = motion[f"VREL_{slot}"]
 
     ret.points = list(self.pts.values())
     return ret
