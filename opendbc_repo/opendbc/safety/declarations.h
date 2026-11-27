@@ -341,6 +341,25 @@ typedef struct {
   bool volkswagen_resume_button_prev;
   bool volkswagen_brake_pedal_switch;
   bool volkswagen_brake_pressure_detected;
+
+  // Toyota TSS3 signer and CONTROL_REQUEST state. This must live in the
+  // per-copy state so redundant safety evaluation remains deterministic.
+  bool toyota_tss3_08a_active;
+  bool toyota_tss3_stock_pcs;
+  uint32_t toyota_tss3_08a_last_tx_ts;
+  uint8_t toyota_tss3_request_next_fragment;
+  uint32_t toyota_tss3_last_request_ts;
+  uint8_t toyota_tss3_request[28];
+  uint8_t toyota_tss3_request_seq[2];
+  uint8_t toyota_tss3_approved[8][28];
+  uint32_t toyota_tss3_approved_ts[8];
+  bool toyota_tss3_approved_valid[8];
+  uint8_t toyota_tss3_approved_idx;
+  uint8_t toyota_tss3_stock_08a[2][28];
+  uint32_t toyota_tss3_stock_08a_ts[2];
+  uint32_t toyota_tss3_stock_08a_last_ts;
+  uint8_t toyota_tss3_stock_08a_idx;
+  uint8_t toyota_tss3_stock_08a_cnt;
 } SafetyState;
 
 typedef struct {
@@ -385,6 +404,8 @@ typedef struct {
   bool toyota_alt_brake;
   bool toyota_stock_longitudinal;
   bool toyota_lta;
+  bool toyota_tss3;
+  bool toyota_tss3_rx_bus_2;
   int toyota_dbc_eps_torque_factor;   // conversion factor for STEER_TORQUE_EPS in %: see dbc file
 
   bool volkswagen_longitudinal;
