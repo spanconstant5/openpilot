@@ -328,8 +328,8 @@ static bool toyota_tss3_request_valid(const uint8_t request[], const Longitudina
   if (valid) {
     // requests are only sent while openpilot is engaged, start from the measured angle after a gap
     if (safety_get_ts_elapsed(now, toyota_tss3_last_request_ts) > TOYOTA_TSS3_08A_TIMEOUT_US) {
-      safety.desired_angle_last = SAFETY_CLAMP(safety.angle_meas.values[0], -TOYOTA_TSS3_ANGLE_STEERING_LIMITS.max_angle,
-                                               TOYOTA_TSS3_ANGLE_STEERING_LIMITS.max_angle);
+      safety.desired_angle_last = safety_clamp_int(safety.angle_meas.values[0], -TOYOTA_TSS3_ANGLE_STEERING_LIMITS.max_angle,
+                                                   TOYOTA_TSS3_ANGLE_STEERING_LIMITS.max_angle);
     }
     toyota_tss3_last_request_ts = now;
 
@@ -338,8 +338,8 @@ static bool toyota_tss3_request_valid(const uint8_t request[], const Longitudina
     bool violation = steer_angle_cmd_checks_vm(angle, lat_active, TOYOTA_TSS3_ANGLE_STEERING_LIMITS, TOYOTA_TSS3_STEERING_PARAMS);
     if (safety_max_limit_check(angle, TOYOTA_TSS3_ANGLE_STEERING_LIMITS.max_angle, -TOYOTA_TSS3_ANGLE_STEERING_LIMITS.max_angle)) {
       violation = true;
-      safety.desired_angle_last = SAFETY_CLAMP(safety.angle_meas.values[0], -TOYOTA_TSS3_ANGLE_STEERING_LIMITS.max_angle,
-                                               TOYOTA_TSS3_ANGLE_STEERING_LIMITS.max_angle);
+      safety.desired_angle_last = safety_clamp_int(safety.angle_meas.values[0], -TOYOTA_TSS3_ANGLE_STEERING_LIMITS.max_angle,
+                                                   TOYOTA_TSS3_ANGLE_STEERING_LIMITS.max_angle);
     }
 
     if (!safety_setup.toyota_stock_longitudinal) {
