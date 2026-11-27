@@ -517,6 +517,10 @@ class TestToyotaTss3Safety(Tss3SafetyHelpers, common.CarSafetyTest, common.Angle
   RELAY_MALFUNCTION_ADDRS = {0: (0x08A, 0x412)}
   FWD_BLACKLISTED_ADDRS = {2: [0x08A, 0x412]}
 
+  RX_QUALITY_FLAGS = {
+    "WHEEL_SPEEDS": {f"WHEEL_SPEED_{wheel}_FAULT": (0,) for wheel in ("FR", "FL", "RR", "RL")},
+  }
+
   MAX_ACCEL = 2.0
   MIN_ACCEL = -3.5
   INACTIVE_ACCEL = 0.0
@@ -784,7 +788,7 @@ class TestToyotaTss3Safety(Tss3SafetyHelpers, common.CarSafetyTest, common.Angle
       self.assertEqual(self._tx(msg), not fd)
 
   def _user_brake_msg(self, brake):
-    return self.packer.make_can_msg_safety("BRAKE_MODULE", 0, {"BRAKE_PRESSED": brake}, fix_toyota_checksum)
+    return self.packer.make_can_msg_safety("BRAKE_MODULE", 0, {"BRAKE_PRESSED": brake})
 
   def _speed_msg(self, speed):
     values = {f"WHEEL_SPEED_{wheel}": speed * 3.6 for wheel in ("FR", "FL", "RR", "RL")}
@@ -893,7 +897,7 @@ class TestToyotaTss3SafetyBus2Rx(common.SafetyTestBase):
       self.packer.make_can_msg_safety("STEER_ANGLE_SENSOR", bus, {}),
       self.packer.make_can_msg_safety("WHEEL_SPEEDS", bus, {}),
       self.packer.make_can_msg_safety("GAS_PEDAL", bus, {}),
-      self.packer.make_can_msg_safety("BRAKE_MODULE", bus, {}, fix_toyota_checksum),
+      self.packer.make_can_msg_safety("BRAKE_MODULE", bus, {}),
       libsafety_py.make_CANPacket(0x08A, 2, TSS3_FRC_08A),
     ]
 
