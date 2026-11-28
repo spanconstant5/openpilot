@@ -5,6 +5,7 @@ from openpilot.selfdrive.ui.mici.widgets.button import BigButton, BigToggle, Big
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigDialog, BigInputDialog, BigConfirmationCircleButton
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.selfdrive.ui.layouts.settings.common import restart_needed_callback
+from openpilot.selfdrive.ui.signer_start_launcher import capture_running, start_capture, status_label, status_message
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.selfdrive.ui.widgets.ssh_key import SshKeyFetcher
 
@@ -31,6 +32,15 @@ class DeveloperLayoutMici(NavScroller):
   def __init__(self):
     super().__init__()
     self._ssh_fetcher = SshKeyFetcher(ui_state.params)
+
+    self._signer_start_btn = BigButton(
+      "signer start",
+      status_label(),
+      description="Create a passive, topology-first package with raw CAN and existing vehicle/firmware metadata. "
+                  "It never transmits CAN or changes an ECU. Files are saved under /data/signer-start.",
+    )
+    self._signer_start_btn.set_enabled(lambda: ui_state.is_offroad())
+    self._signer_start_btn.set_click_callback(self._on_signer_start)
 
     def github_username_callback(username: str):
       if username:
@@ -90,6 +100,7 @@ class DeveloperLayoutMici(NavScroller):
                                               description="Show touch locations and the UI frame rate.")
 
     self._scroller.add_widgets([
+      self._signer_start_btn,
       self._adb_toggle,
       self._ssh_toggle,
       self._ssh_keys_btn,
@@ -138,6 +149,16 @@ class DeveloperLayoutMici(NavScroller):
   def _update_state(self):
     super()._update_state()
     self._ssh_fetcher.update()
+    self._signer_start_btn.set_value(status_label())
+
+  def _on_signer_start(self):
+    if capture_running():
+      gui_app.push_widget(BigDialog("signer start", status_message()))
+      return
+    started, message = start_capture()
+    if started:
+      message += " Package output is under /data/signer-start and contains private vehicle identifiers and raw CAN data."
+    gui_app.push_widget(BigDialog("signer start", message))
 
   def show_event(self):
     super().show_event()

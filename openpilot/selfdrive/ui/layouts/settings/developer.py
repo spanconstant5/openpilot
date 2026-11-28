@@ -1,10 +1,11 @@
 from openpilot.common.params import Params
 from openpilot.selfdrive.ui.widgets.ssh_key import ssh_key_item
+from openpilot.selfdrive.ui.signer_start_launcher import capture_running, start_capture, status_label, status_message
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.widgets import Widget
-from openpilot.system.ui.widgets.list_view import toggle_item
+from openpilot.system.ui.widgets.list_view import button_item, toggle_item
 from openpilot.system.ui.widgets.scroller_tici import Scroller
-from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
+from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog, alert_dialog
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.multilang import tr, tr_noop
 from openpilot.system.ui.widgets import DialogResult
@@ -25,6 +26,11 @@ DESCRIPTIONS = {
     "Enable this to switch to openpilot longitudinal control. " +
     "Changing this setting will restart openpilot if the car is powered on."
   ),
+  'signer_start': tr_noop(
+    "Create a passive, topology-first research package for starting a RAM-resident signer port. "
+    "It records CAN traffic and existing vehicle/firmware metadata, but never transmits CAN or changes an ECU. "
+    "Packages are saved under /data/signer-start."
+  ),
 }
 
 
@@ -33,6 +39,14 @@ class DeveloperLayout(Widget):
     super().__init__()
     self._params = Params()
     self._is_release = self._params.get_bool("IsReleaseBranch")
+
+    self._signer_start_btn = button_item(
+      lambda: tr("Signer Start Research Capture"),
+      status_label,
+      description=lambda: tr(DESCRIPTIONS["signer_start"]),
+      callback=self._on_signer_start,
+      enabled=ui_state.is_offroad,
+    )
 
     # Build items and keep references for callbacks/state updates
     self._adb_toggle = toggle_item(
@@ -91,6 +105,7 @@ class DeveloperLayout(Widget):
     self._on_enable_ui_debug(self._params.get_bool("ShowDebugInfo"))
 
     self._scroller = Scroller([
+      self._signer_start_btn,
       self._adb_toggle,
       self._ssh_toggle,
       self._ssh_keys,
@@ -103,6 +118,15 @@ class DeveloperLayout(Widget):
 
     # Toggles should be not available to change in onroad state
     ui_state.add_offroad_transition_callback(self._update_toggles)
+
+  def _on_signer_start(self):
+    if capture_running():
+      gui_app.push_widget(alert_dialog(status_message()))
+      return
+    started, message = start_capture()
+    if started:
+      message += "\n\nThe package will be saved under /data/signer-start. It contains private vehicle identifiers and raw CAN data."
+    gui_app.push_widget(alert_dialog(message))
 
   def _render(self, rect):
     self._scroller.render(rect)
