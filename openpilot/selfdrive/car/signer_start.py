@@ -25,6 +25,7 @@ from typing import Any
 
 
 REPORT_SCHEMA = "signer-start-report-v1"
+PORT_SEED_SCHEMA = "signer-start-port-seed-v1"
 STATUS_SCHEMA = "signer-start-status-v1"
 DEFAULT_OUTPUT_ROOT = Path("/data/signer-start")
 EXPECTED_CHASSIS_BUS = 0
@@ -324,10 +325,91 @@ def _signer_evidence(inventory: dict[int, dict[int, MessageStats]], capture_seco
   return ret
 
 
+def vehicle_enrollment(vehicle: dict[str, Any], firmware: list[dict[str, Any]]) -> dict[str, Any]:
+  """Build a stable, non-VIN directory key for one car/firmware set."""
+  vin = str(vehicle.get("vin", "")).strip()
+  fingerprint = str(vehicle.get("car_fingerprint", "")).strip()
+  meaningful_vin = len(vin) == 17 and vin not in {"0" * 17, "UNKNOWN"}
+  firmware_identity = sorted(
+    f"{entry.get('ecu')}:{entry.get('address')}:{entry.get('sub_address')}:{entry.get('firmware_version_hex')}"
+    for entry in firmware
+  )
+  identity_parts = ([f"vin:{vin}"] if meaningful_vin else []) + [f"fingerprint:{fingerprint}", *firmware_identity]
+  identity_material = "\n".join(identity_parts).encode("utf-8")
+  identity_hash = hashlib.sha256(identity_material).hexdigest()[:16]
+  brand = str(vehicle.get("brand", "unknown")).strip().lower() or "unknown"
+  safe_brand = "".join(character if character.isalnum() else "-" for character in brand).strip("-")[:20] or "unknown"
+  return {
+    "enrollment_id": f"{safe_brand}-{identity_hash}",
+    "scope": "one physical vehicle and its current ECU firmware set" if meaningful_vin else "one fingerprint/firmware set; VIN was unavailable",
+    "identity_basis": ["vin", "fingerprint", "firmware"] if meaningful_vin else ["fingerprint", "firmware"],
+    "vin_present": meaningful_vin,
+    "firmware_tuple_count": len(firmware_identity),
+  }
+
+
+def _address_observations(inventory: dict[int, dict[int, MessageStats]], address: int,
+                          capture_seconds: float) -> list[dict[str, Any]]:
+  return [
+    {"bus": bus, "address": f"0x{address:03X}", **messages[address].as_dict(capture_seconds)}
+    for bus, messages in sorted(inventory.items())
+    if bus < RECEIPT_BUS_MIN and address in messages
+  ]
+
+
+def tss3_vehicle_analysis(inventory: dict[int, dict[int, MessageStats]], capture_seconds: float,
+                          vehicle: dict[str, Any], topology: dict[str, Any]) -> dict[str, Any]:
+  brand = str(vehicle.get("brand", "")).strip().lower()
+  control_request = _address_observations(inventory, 0x08A, capture_seconds)
+  diagnostic_request = _address_observations(inventory, 0x7A1, capture_seconds)
+  diagnostic_response = _address_observations(inventory, 0x7A9, capture_seconds)
+  control_buses = [item["bus"] for item in control_request]
+  candidate = brand in {"toyota", "lexus"} and (bool(control_request) or topology.get("profile") == "toyota_tss3")
+  return {
+    "candidate": candidate,
+    "candidate_reason": (
+      "Toyota/Lexus identity with TSS3 marker traffic."
+      if candidate else "This capture does not yet establish a Toyota/Lexus TSS3 target."
+    ),
+    "control_request_0x08a": {
+      "observed": bool(control_request),
+      "observed_buses": control_buses,
+      "camera_side_only": control_buses == [EXPECTED_CAMERA_BUS],
+      "multiple_physical_sides": len(set(control_buses)) > 1,
+      "observations": control_request,
+    },
+    "eps_diagnostic_request_0x7a1": diagnostic_request,
+    "eps_diagnostic_response_0x7a9": diagnostic_response,
+    "relay_separation_observed": topology.get("status") != "bridged_or_mirrored",
+  }
+
+
+def _capture_recommendations(topology: dict[str, Any], vehicle: dict[str, Any], firmware: list[dict[str, Any]],
+                             tss3: dict[str, Any]) -> list[str]:
+  recommendations = []
+  if topology["status"] == "bridged_or_mirrored":
+    recommendations.append("Repeat with the interception relay confirmed open; bridged CAN0/CAN2 cannot prove physical side ownership.")
+  elif topology["gate"] != "PASS":
+    recommendations.append("Physically verify harness connector sides and repeat until the topology gate passes.")
+  if vehicle.get("car_fingerprint") in (None, "", "MOCK") or vehicle.get("fuzzy_fingerprint", True):
+    recommendations.append("Allow firmware fingerprinting to finish after a full ignition cycle, then repeat for an exact identity.")
+  if not firmware:
+    recommendations.append("Wait for openpilot's firmware query to complete, power-cycle the car, and repeat to capture ECU firmware tuples.")
+  if not any("eps" in entry.get("ecu", "").lower() for entry in firmware):
+    recommendations.append("Capture or identify the EPS firmware response before treating this car as a signer-port candidate.")
+  if tss3["candidate"] and not tss3["control_request_0x08a"]["observed"]:
+    recommendations.append("Repeat with the FRC connected and ignition on so stock CONTROL_REQUEST 0x08A is present.")
+  if tss3["control_request_0x08a"]["multiple_physical_sides"]:
+    recommendations.append("Resolve why 0x08A appears on both physical sides before assigning message ownership.")
+  return recommendations
+
+
 def build_report(inventory: dict[int, dict[int, MessageStats]], capture_seconds: float, frame_count: int,
                  vehicle: dict[str, Any], firmware: list[dict[str, Any]], metadata: dict[str, Any],
                  log_references: list[dict[str, Any]], cancelled: bool = False) -> dict[str, Any]:
   topology = analyze_topology(inventory, str(vehicle.get("brand", "")))
+  enrollment = vehicle_enrollment(vehicle, firmware)
+  tss3 = tss3_vehicle_analysis(inventory, capture_seconds, vehicle, topology)
   bus_inventory = {
     str(bus): {f"0x{address:X}": stats.as_dict(capture_seconds) for address, stats in sorted(messages.items())}
     for bus, messages in sorted(inventory.items())
@@ -347,11 +429,25 @@ def build_report(inventory: dict[int, dict[int, MessageStats]], capture_seconds:
     {"name": "raw CAN capture", "passed": frame_count > 0,
      "detail": f"Recorded {frame_count} received frames." if frame_count else "No frames were recorded."},
   ]
+  if tss3["candidate"]:
+    control_request = tss3["control_request_0x08a"]
+    checks.append({
+      "name": "TSS3 CONTROL_REQUEST ownership",
+      "passed": control_request["camera_side_only"],
+      "detail": (
+        "0x08A was observed only on the expected camera/FRC side (bus 2)."
+        if control_request["camera_side_only"] else
+        f"0x08A ownership is not isolated to bus 2; observed buses: {control_request['observed_buses']}."
+      ),
+    })
   ready = all(check["passed"] for check in checks)
+  recommendations = _capture_recommendations(topology, vehicle, firmware, tss3)
   return {
     "schema": REPORT_SCHEMA,
     "created_utc": datetime.now(timezone.utc).isoformat(),
     "topology": topology,
+    "vehicle_enrollment": enrollment,
+    "tss3_vehicle_analysis": tss3,
     "capture": {"capture_seconds": round(capture_seconds, 3), "frame_count": frame_count, "cancelled": cancelled,
                 "raw_file": "can_capture.jsonl", "buses": bus_inventory},
     "vehicle": vehicle,
@@ -360,6 +456,7 @@ def build_report(inventory: dict[int, dict[int, MessageStats]], capture_seconds:
     "system_metadata": metadata,
     "recent_log_references": log_references,
     "readiness": {"status": "READY_FOR_AUTHORIZED_LAB_ANALYSIS" if ready else "MORE_DATA_REQUIRED", "checks": checks},
+    "recommended_next_capture": recommendations,
     "still_requires_vehicle_specific_lab_work": [
       "authorized ECU firmware or RAM acquisition using vehicle-specific bench procedures",
       "firmware reverse engineering to identify the signature routine, state, and integrity checks",
@@ -379,6 +476,7 @@ def build_report(inventory: dict[int, dict[int, MessageStats]], capture_seconds:
 
 def render_markdown(report: dict[str, Any]) -> str:
   topology, vehicle = report["topology"], report["vehicle"]
+  enrollment, tss3 = report["vehicle_enrollment"], report["tss3_vehicle_analysis"]
   lines = [
     "# Signer Start research capture", "",
     "## 1. Topology gate — resolve this first", "",
@@ -393,23 +491,34 @@ def render_markdown(report: dict[str, Any]) -> str:
   lines += [f"- Evidence: {item}" for item in topology["evidence_summary"]]
   lines += [f"- Warning: **{item}**" for item in topology["warnings"]]
   lines += [
-    "", "## 2. Vehicle identity and cached firmware", "",
+    "", "## 2. Per-car enrollment", "",
+    f"- Enrollment ID: `{enrollment['enrollment_id']}`",
+    f"- Scope: {enrollment['scope']}",
+    f"- Identity basis: {', '.join(enrollment['identity_basis'])}",
+    f"- TSS3 candidate: `{tss3['candidate']}` — {tss3['candidate_reason']}",
+    f"- 0x08A observed buses: `{tss3['control_request_0x08a']['observed_buses']}`",
+    f"- 0x08A isolated to camera/FRC bus 2: `{tss3['control_request_0x08a']['camera_side_only']}`", "",
+    "## 3. Vehicle identity and cached firmware", "",
     f"- Fingerprint: `{vehicle.get('car_fingerprint', 'unavailable')}`",
     f"- Brand: `{vehicle.get('brand', 'unavailable')}`",
     f"- VIN: `{vehicle.get('vin', 'unavailable')}`",
     f"- Fuzzy fingerprint: `{vehicle.get('fuzzy_fingerprint', 'unavailable')}`",
     f"- Firmware entries: {vehicle.get('firmware_entry_count', 0)}", "",
-    "## 3. Passive capture", "",
+    "## 4. Passive capture", "",
     f"- Duration: {report['capture']['capture_seconds']:.3f} seconds",
     f"- Received frames: {report['capture']['frame_count']}",
     f"- Cancelled early: {report['capture']['cancelled']}",
     "- Raw stream: `can_capture.jsonl`", "",
-    "## 4. Readiness", "",
+    "## 5. Per-car port readiness", "",
   ]
   for check in report["readiness"]["checks"]:
     lines.append(f"- [{'x' if check['passed'] else ' '}] {check['name']}: {check['detail']}")
-  lines += ["", f"Overall: **{report['readiness']['status']}**", "",
-            "## 5. Vehicle-specific lab work still required", ""]
+  lines += ["", f"Overall: **{report['readiness']['status']}**", ""]
+  if report["recommended_next_capture"]:
+    lines += ["## 6. Recommended next capture", ""]
+    lines += [f"- {item}" for item in report["recommended_next_capture"]]
+    lines.append("")
+  lines += ["## 7. Vehicle-specific lab work still required", ""]
   lines += [f"- {item}" for item in report["still_requires_vehicle_specific_lab_work"]]
   lines += ["", "## Safety and privacy boundary", "",
             "This package contains vehicle identifiers and raw CAN traffic. Keep it private unless deliberately sharing it with a researcher. ",
@@ -442,8 +551,26 @@ def _emit_status(output_root: Path, stage: str, title: str, detail: str, progres
   print(json.dumps(status, sort_keys=True), flush=True)
 
 
+def build_port_seed(report: dict[str, Any]) -> dict[str, Any]:
+  """Return the compact, per-car handoff used to start a new port."""
+  return {
+    "schema": PORT_SEED_SCHEMA,
+    "created_utc": report["created_utc"],
+    "vehicle_enrollment": report["vehicle_enrollment"],
+    "vehicle": report["vehicle"],
+    "firmware_match_seed": report["firmware_inventory"],
+    "topology": report["topology"],
+    "tss3": report["tss3_vehicle_analysis"],
+    "readiness": report["readiness"],
+    "recommended_next_capture": report["recommended_next_capture"],
+    "raw_can_file": report["capture"]["raw_file"],
+    "safety_boundary": report["safety_boundary"],
+  }
+
+
 def _write_package(run_dir: Path, report: dict[str, Any], raw_params: dict[str, bytes]) -> Path:
   _write_json(run_dir / "report.json", report)
+  _write_json(run_dir / "port_seed.json", build_port_seed(report))
   (run_dir / "report.md").write_text(render_markdown(report), encoding="utf-8")
   for name, raw in raw_params.items():
     (run_dir / name).write_bytes(raw)
@@ -465,14 +592,17 @@ def collect_live(duration: float, wait_timeout: float, output_root: Path) -> tup
   from openpilot.common.params import Params
 
   output_root.mkdir(parents=True, exist_ok=True)
-  stamp = time.strftime("%Y%m%dT%H%M%S", time.localtime())
-  run_dir = output_root / f"{stamp}-{os.getpid()}"
-  run_dir.mkdir(parents=True, exist_ok=False)
   params = Params()
   raw_params = {key: value for key in ("CarParamsPersistent", "CarParamsCache", "CarParamsPrevRoute")
                 if (value := params.get(key)) is not None}
   raw_cp = raw_params.get("CarParamsPersistent") or raw_params.get("CarParamsCache")
   vehicle, firmware = car_params_summary(raw_cp)
+  enrollment = vehicle_enrollment(vehicle, firmware)
+  stamp = time.strftime("%Y%m%dT%H%M%S", time.localtime())
+  vehicle_root = output_root / "vehicles" / enrollment["enrollment_id"]
+  vehicle_root.mkdir(parents=True, exist_ok=True)
+  run_dir = vehicle_root / f"{stamp}-{os.getpid()}"
+  run_dir.mkdir(parents=True, exist_ok=False)
   metadata = {
     "platform": platform.platform(), "python": sys.version,
     **{key: _safe_param(params, key) for key in
@@ -524,6 +654,7 @@ def collect_live(duration: float, wait_timeout: float, output_root: Path) -> tup
                         _recent_log_references(), cancelled=_stop_requested)
   raw_files = {f"{key}.bin": value for key, value in raw_params.items()}
   archive = _write_package(run_dir, report, raw_files)
+  (vehicle_root / "LATEST").write_text(str(run_dir) + "\n", encoding="utf-8")
   (output_root / "LATEST").write_text(str(run_dir) + "\n", encoding="utf-8")
   return archive, report
 

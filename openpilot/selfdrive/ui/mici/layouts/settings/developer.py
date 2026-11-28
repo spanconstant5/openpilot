@@ -36,7 +36,7 @@ class DeveloperLayoutMici(NavScroller):
     self._signer_start_btn = BigButton(
       "signer start",
       status_label(),
-      description="Create a passive, topology-first package with raw CAN and existing vehicle/firmware metadata. "
+      description="Enroll this car with a passive, topology-first package containing raw CAN and existing vehicle/firmware metadata. "
                   "It never transmits CAN or changes an ECU. Files are saved under /data/signer-start.",
     )
     self._signer_start_btn.set_enabled(lambda: ui_state.is_offroad())

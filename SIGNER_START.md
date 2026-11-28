@@ -1,6 +1,6 @@
 # Signer Start
 
-Signer Start is a clean openpilot research build for beginning a RAM-resident signer investigation on a new vehicle. It is deliberately independent of SunnyPilot, StarPilot, IQPilot, and existing vehicle-specific signer ports.
+Signer Start is a clean openpilot research build for enrolling one new vehicle at a time into a RAM-resident signer investigation—particularly a new Toyota/Lexus TSS3 platform. It is deliberately independent of SunnyPilot, StarPilot, IQPilot, and existing vehicle-specific signer ports.
 
 Install on a comma with:
 
@@ -14,7 +14,9 @@ installer.comma.ai/spanconstant5/start
 2. With the vehicle off and openpilot disengaged, open **Settings → Developer → Signer Start Research Capture**.
 3. Press **START**, then start the vehicle while it remains parked. The tool waits up to three minutes for CAN traffic.
 4. Leave the vehicle on and parked for the 60-second capture. The button shows progress if the Developer page is open.
-5. After it displays **SAVED**, retrieve the newest ZIP from `/data/signer-start/` using SSH or Cyberduck. The `LATEST` text file names the corresponding unpacked directory.
+5. After it displays **SAVED**, retrieve the newest ZIP under `/data/signer-start/vehicles/<enrollment-id>/` using SSH or Cyberduck. `/data/signer-start/LATEST` names the corresponding unpacked directory.
+
+Run this workflow separately on every new car. The enrollment ID is a stable hash of that car's VIN (when available), fingerprint, and ECU firmware set; the VIN is not placed in the directory name. If an ECU is replaced or its firmware changes, the resulting firmware set can receive a different enrollment ID.
 
 The same capture can be started over SSH:
 
@@ -25,7 +27,7 @@ python3 -m openpilot.selfdrive.car.signer_start
 
 ## What the package contains
 
-Every package puts the topology result first in both `report.md` and `report.json`. It includes:
+Every per-car package puts the topology result first in both `report.md` and `report.json`. It includes:
 
 - CAN0/CAN2 separation, overlap, traffic rates, validated marker evidence, and a topology PASS/BLOCK gate;
 - a timestamped raw receive-only CAN stream in `can_capture.jsonl`;
@@ -33,10 +35,13 @@ Every package puts the topology result first in both `report.md` and `report.jso
 - cached ECU firmware responses, including EPS firmware when available;
 - openpilot, Panda, branch, commit, and device metadata;
 - raw cached `CarParams` blobs and recent qlog/rlog route references;
+- a compact `port_seed.json` handoff with the exact per-car firmware tuples, topology result, TSS3 `0x08A` bus ownership, EPS diagnostic observations, and recapture recommendations;
 - a manifest with file sizes and SHA-256 hashes;
 - an explicit list of information still requiring authorized vehicle-specific bench work.
 
-The current validated topology profile is Toyota/Lexus TSS3. Other makes still receive the full capture, but the topology gate reports `profile_needed` rather than guessing bus roles. A new profile should only be added after comparing known physical sides and control captures.
+The current validated topology profile is Toyota/Lexus TSS3. For each new TSS3 car, Signer Start checks that stock CONTROL_REQUEST `0x08A` is observable and isolated to the expected camera/FRC side after topology is resolved. If the relay is still bridged, fingerprinting is incomplete, EPS firmware is absent, or `0x08A` ownership is ambiguous, the report gives the exact recapture needed instead of treating another TSS3 car as equivalent.
+
+Other makes still receive the full capture, but the topology gate reports `profile_needed` rather than guessing bus roles. A new profile should only be added after comparing known physical sides and control captures.
 
 ## Safety and privacy boundary
 

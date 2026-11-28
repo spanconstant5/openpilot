@@ -27,7 +27,7 @@ DESCRIPTIONS = {
     "Changing this setting will restart openpilot if the car is powered on."
   ),
   'signer_start': tr_noop(
-    "Create a passive, topology-first research package for starting a RAM-resident signer port. "
+    "Enroll this car with a passive, topology-first research package for starting its RAM-resident signer port. "
     "It records CAN traffic and existing vehicle/firmware metadata, but never transmits CAN or changes an ECU. "
     "Packages are saved under /data/signer-start."
   ),
